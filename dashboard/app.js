@@ -55,16 +55,17 @@ function kpi(label, value, note) { return '<div class=kpi><span>' + label + '</s
 function hero() {
 var v = D.tests.value, o = D.tests.odds, b = D.model.band;
 var vk = v.filter(function (t) { return t.kept; }).length, ok = o.filter(function (t) { return t.kept; }).length;
+var total = D.rows.reduce(function (a, r) { return a + r.implied_value_usd; }, 0);
 var sector = v[2], base = o[0], finalO = o[2];
 return '<section class=hero><div><p class=kicker>Pre-token radar · ' + D.as_of + '</p><h1>What a token would be worth</h1><p class=dek>' +
 D.scanned + ' protocols scanned: ' + D.ledger.ranked + ' ranked on the board, ' + D.ledger.pre + ' more pre-token under the floor, ' + D.ledger.token + ' already trading, ' +
 D.ledger.cex + ' exchanges and ' + D.ledger.versioned + ' versioned pools set aside. Each row prices a launch, discounts it by the probability it happens, and prices the farm that pays for the attempt.</p></div><div class=kpis>' +
-kpi('Range covers', Math.round(b.cover25 * 100) + '%/' + Math.round(b.newer25 * 100) + '%', 'P25-P75, blind and newer') +
-kpi('Walk-forward miss', 'x' + Math.pow(10, sector.newer).toFixed(2), 'newest ' + b.newerN + ' tokens; flat x' + Math.pow(10, v[0].newer).toFixed(2)) +
-kpi('Odds Brier', finalO.brier.toFixed(3), 'ten-fold; base rate ' + base.brier.toFixed(3)) +
-kpi('Terms kept', vk + '/' + (v.length - 1) + ' + ' + ok + '/' + (o.length - 1), 'value and odds; both misses fall') +
-kpi('Worth farming', D.farms + '/' + D.board_size, '$25/h after fees and slippage') +
-kpi('Watchlist', D.checks.watchlist_covered + '/' + D.checks.watchlist_total, 'every slug ranked') +
+kpi('Implied range', Math.round(b.cover25 * 100) + '%/' + Math.round(b.newer25 * 100) + '%', 'P25-P75: in-sample / newest ' + b.newerN + ', both blind') +
+kpi('Error vs flat', 'x' + Math.pow(10, sector.newer).toFixed(2), 'walk-forward, newest ' + b.newerN + ' tokens; flat model x' + Math.pow(10, v[0].newer).toFixed(2)) +
+kpi('Launch odds', 'Brier ' + finalO.brier.toFixed(3), 'ten-fold; ' + base.brier.toFixed(3) + ' if we guessed the base rate') +
+kpi('Blind tests kept', (vk + ok) + '/' + (v.length - 1 + o.length - 1), 'value ' + vk + '/' + (v.length - 1) + ', odds ' + ok + '/' + (o.length - 1) + '; misses listed in source') +
+kpi('Farms over $25/h', D.farms + '/' + D.board_size, 'after gas, slippage and 2.2 h hands-on') +
+kpi('Board implied value', usd(total), 'sum of the ' + D.board_size + ' rows; launch value x odds') +
 '</div></section>';
 }
 
@@ -123,7 +124,7 @@ function rowHtml(r) {
 var g = r.change_7d;
 function at(v) { return Math.min(100, Math.sqrt(Math.max(0, v) / IMP_MAX) * 100); }
 var lo = at(r.implied_low), hi = at(r.implied_high), pt = at(r.implied_value_usd);
-var sub = state.farms ? esc(r.farm.play) + ' · cost ' + usd2(r.farm.cost) + ' · ' + hoursText(r.farm.timeMin) : [catName(r.category)].concat(r.chains.slice(0, 2)).join(' · ') + ' · ' + pct(g);
+var sub = state.farms ? esc(r.farm.play) + ' · cost ' + usd2(r.farm.cost) + ' · ' + hoursText(r.farm.timeMin) : (g === null || g === undefined ? 'no 7d' : pct(g) + ' 7d') + ' · ' + [catName(r.category)].concat(r.chains.slice(0, 2)).join(' · ');
 return '<tr data-slug="' + esc(r.slug) + '"><td class=rank>' + r.rank + '</td>' +
 '<td><div class=pname>' + esc(r.name) + '</div><div class=psub>' + esc(sub) + '</div>' + '</td>' +
 '<td class=r>' + usd(r.tvl_usd) + '</td><td class=r>' + age(r.age_days) + '</td>' +
@@ -191,12 +192,26 @@ return panel('Accounting, ' + D.ledger_sum, 'EVERY PROTOCOL ONCE',
 '<div class="lrow2 total"><span>total</span><b>' + D.ledger_sum + '</b></div></div>' +
 '<div class=strip6>' + chk(c.rows_recomputed + '/' + c.rows + ' rows recomputed') + chk(c.watchlist_covered + '/' + c.watchlist_total + ' watchlist ranked') +
 chk(sum + ' = ' + D.ledger_sum) + chk(c.hardcoded_names + ' names hardcoded') + chk(c.comps_dated + ' dated comps') +
-chk(c.sorted ? 'ranks 1-' + c.rows + ' monotone' : 'ranks not monotone') + '</div>');
+chk(c.sorted ? 'implied falls 1-' + c.rows : 'implied not monotone') + '</div>');
+}
+
+/** checksBar(): the six self-checks, printed above the table so a narrow screen still sees them. */
+function checksBar() {
+var l = D.ledger, c = D.checks;
+var items = [
+c.rows_recomputed + '/' + c.rows + ' rows recomputed, drawn = written',
+c.watchlist_covered + '/' + c.watchlist_total + ' watchlist ranked',
+[l.ranked, l.token, l.pre, l.cex, l.versioned].join(' + ') + ' = ' + D.ledger_sum,
+c.hardcoded_names + ' names hardcoded',
+c.comps_dated + ' dated comps',
+c.sorted ? 'implied falls 1-' + c.rows : 'implied not monotone'
+];
+return '<div class=checksbar><b>Self-checks, rebuilt every run</b>' + items.map(function (t) { return '<span class=cbar><i></i>' + t + '</span>'; }).join('') + '</div>';
 }
 
 /** boardHtml() */
 function boardHtml() {
-return '<section class=shell>' + hero() + '<div class=board><section class=bmain>' + filterBar() + '<p class=caption id=cap></p>' +
+return '<section class=shell>' + hero() + '<div class=board><section class=bmain>' + filterBar() + '<p class=caption id=cap></p>' + checksBar() +
 '<div class=tablebox><table><thead id=thead>' + thead() + '</thead><tbody id=rows></tbody></table></div><p class="caption more" id=more></p></section>' +
 '<aside class=side>' + modelPanel() + termsPanel() + ledgerPanel() + '</aside></div></section>';
 }

@@ -53,6 +53,10 @@ table{border-collapse:collapse;width:100%}
 .check input{accent-color:var(--ink);width:13px;height:13px;margin:0}
 .btn{height:30px;border:1px solid var(--ink);background:transparent;padding:0 11px;font-size:9px;letter-spacing:.12em;text-transform:uppercase}
 .count{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--ink);padding:3px 7px;border:1px solid var(--rule);background:var(--sand);white-space:nowrap}
+.checksbar{display:flex;flex-wrap:wrap;align-items:center;gap:5px 16px;padding:9px 0 8px;border-bottom:1px solid var(--rule)}
+.checksbar>b{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:400}
+.cbar{display:inline-flex;align-items:baseline;gap:5px;font-family:var(--mono);font-size:10px;white-space:nowrap}
+.cbar i{flex:0 0 auto;display:block;width:5px;height:5px;background:var(--forest);transform:translateY(-1px)}
 .tablebox{overflow:auto;border-bottom:1px solid var(--ink)}
 thead th{position:sticky;top:0;z-index:2;background:var(--bone);border-bottom:1px solid var(--ink);padding:0;text-align:left;font-weight:400}
 thead th button{width:100%;display:flex;align-items:center;gap:4px;border:0;background:none;padding:9px 7px;font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
@@ -71,7 +75,7 @@ td.r{text-align:right;font-family:var(--mono);white-space:nowrap}
 .obar i{display:block;height:100%;background:var(--ink)}
 .imp{text-align:right;width:126px}
 .impv{font-family:var(--mono);font-size:12px;font-weight:650;white-space:nowrap}
-.impr{font-family:var(--mono);font-size:9px;color:#5d584f;white-space:nowrap;text-align:right}
+.impr{font-family:var(--mono);font-size:9.5px;color:#3f3b34;white-space:nowrap;text-align:right}
 .impbar{position:relative;height:5px;background:var(--sand);margin:4px 0 0 auto}
 .impbar i{position:absolute;top:0;bottom:0;display:block}
 .impbar .band{background:#a99c85}
