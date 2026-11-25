@@ -156,7 +156,7 @@ function copyFiles(from: string, to: string): string[] {
 const dashboard = copyFiles(join(here, 'dashboard'), join(out, 'dashboard'));
 const shots = copyFiles(join(here, 'screenshots'), join(out, 'screenshots'));
 if (shots.length < 3) {
-  process.stderr.write(`launch ledger: screenshots/ holds ${shots.length} image${shots.length === 1 ? '' : 's'}: hand in three, the board, a detail view and a planner view\n`);
+  process.stderr.write(`launch ledger: screenshots/ holds ${shots.length} image${shots.length === 1 ? '' : 's'}: hand in three, the board, a detail view and a filtered view\n`);
   process.exit(1);
 }
 for (const name of shots) {
@@ -178,6 +178,6 @@ process.stdout.write(
   `launch ledger: ${snapshot.protocols.length} scanned, ${radar.pre_token} pre-token, ${radar.watchlist_size} watchlist, ${radar.live_size} live set aside\n` +
     `launch ledger: board ${radar.board_size} rows, ${radar.early_size} early, ${radar.checks.watchlist_covered}/${radar.checks.watchlist_total} watchlist, checkBoard ${radar.checks.rows_recomputed}/${radar.checks.rows}\n` +
     `launch ledger: top three ${top}\n` +
-    `launch ledger: blind tests LOO ${radar.backtest.loo.inside}/${radar.backtest.loo.n} (${Math.round(radar.backtest.loo.share * 100)}%), newer ${radar.backtest.newer.inside}/${radar.backtest.newer.n} (${Math.round(radar.backtest.newer.share * 100)}%), band ${radar.backtest.band.toFixed(2)} dex\n` +
+    `launch ledger: value leg LOO x${Math.pow(10, radar.tests.value[2].loo).toFixed(2)}, newer x${Math.pow(10, radar.tests.value[2].newer).toFixed(2)}; odds Brier ${radar.tests.odds[2].brier.toFixed(3)}, newer ${radar.tests.odds[2].newerBrier.toFixed(3)}\n` +
     `launch ledger: wrote ${join(out, 'board.json')}, ${join(out, 'data.js')}, ${join(out, 'dashboard')} (${dashboard.length} files), ${join(out, 'screenshots')} (${shots.length} images) and ${join(out, 'dossier.json')}\n`
 );

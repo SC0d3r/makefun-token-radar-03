@@ -1,11 +1,15 @@
-// Launch Ledger's page: reads window.RADAR and window.RadarModel; renders the board, detail, planner
-// and set-aside from the hash. No network, no clock; every figure is a value from data.js.
+// Launch Ledger's page: the board, one protocol's dossier and the farm-only view. No network, no clock,
+// no randomness. Every figure is a value the model published in data.js.
 (function () {
 'use strict';
 var D = window.RADAR, M = window.RadarModel;
 if (!D || !M) return;
 var app = document.getElementById('app');
 var state = { q: '', sector: 'all', chain: 'all', growth: 'all', farms: false, sort: 'implied', dir: -1 };
+var FOCUS = (D.rows.filter(function (r) { return r.farm.verdict === 'FARM'; })[0] || D.rows[0]).slug;
+var IMP_MAX = Math.max.apply(null, D.rows.map(function (r) { return r.implied_high || 1; })) || 1;
+var STEP_NAMES = ['Verify', 'Bridge and fund', 'Enter', 'Qualify', 'Upkeep', 'Stop rule', 'Exit', 'Claim'];
+var STEP_DAYS = [0, 0, 1, 7, 14, 30, 80, 90];
 
 /** esc(s) */
 function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
@@ -14,11 +18,15 @@ function trim(n) { var r = Math.round(n * 100) / 100; return r % 1 === 0 ? Strin
 /** usd(n) */
 function usd(n) {
 if (n === null || n === undefined || !isFinite(n)) return 'n/a';
-var a = Math.abs(n);
-return a >= 1e9 ? '$' + trim(n / 1e9) + 'B' : a >= 1e6 ? '$' + (Math.round(n / 1e5) / 10).toFixed(1) + 'M' : a >= 1e3 ? '$' + Math.round(n / 1e3) + 'K' : '$' + Math.round(n);
+var a = Math.abs(n), sign = n < 0 ? '-' : '';
+return sign + (a >= 1e9 ? '$' + trim(a / 1e9) + 'B' : a >= 1e6 ? '$' + (Math.round(a / 1e5) / 10).toFixed(1) + 'M' : a >= 1e3 ? '$' + Math.round(a / 1e3) + 'K' : '$' + Math.round(a));
 }
 /** usd2(n) */
-function usd2(n) { return '$' + (Math.round(n * 100) / 100).toFixed(2); }
+function usd2(n) { return (n < 0 ? '-' : '') + '$' + (Math.round(Math.abs(n) * 100) / 100).toFixed(2); }
+/** usdC(n): dollars and cents with thousands separators, for sums the reader will check. */
+function usdC(n) { return (n < 0 ? '-' : '') + '$' + (Math.round(Math.abs(n) * 100) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+/** catName(c): the snapshot's category key as the page prints it. */
+function catName(c) { return String(c) === 'Dexs' ? 'DEXs' : String(c); }
 /** pct(n) */
 function pct(n) { return n === null || n === undefined || !isFinite(n) ? 'no 7d' : (n > 0 ? '+' : '') + n.toFixed(1) + '%'; }
 /** age(days) */
@@ -27,14 +35,14 @@ function age(days) { return days === null || days === undefined ? 'unknown' : da
 function ageWords(days) { return days === null || days === undefined ? 'an unknown number of days' : days.toLocaleString('en-US') + ' days'; }
 /** mult(n) */
 function mult(n) { return n === null || n === undefined || !isFinite(n) ? 'n/a' : trim(n) + 'x'; }
-/** dex(n) */
-function dex(n) { return n === null || n === undefined ? '0.00 dex' : (n >= 0 ? '+' : '') + n.toFixed(2) + ' dex'; }
 /** byId(id) */
 function byId(id) { return document.getElementById(id); }
+/** hoursText(min) */
+function hoursText(min) { var h = Math.floor(min / 60), m = min % 60; return h + ' h' + (m ? ' ' + m + ' min' : ''); }
 
 /** topbar(active) */
 function topbar(active) {
-var nav = [['#/', 'Board', 'board'], ['#/p/' + D.rows[0].slug, 'Detail', 'detail'], ['#/planner', 'Planner', 'planner'], ['#/aside', 'Set aside', 'aside']];
+var nav = [['#/', 'Board', 'board'], ['#/p/' + FOCUS, 'Detail', 'detail'], ['#/farms', 'Farms', 'farms']];
 return '<header class=topbar><div class=topbar-in><a class=wordmark href="#/"><i></i>LAUNCH LEDGER</a><nav class=topnav>' +
 nav.map(function (n) { return '<a href="' + n[0] + '"' + (active === n[2] ? ' class=on' : '') + '>' + n[1] + '</a>'; }).join('') +
 '</nav><div class=topright><span class=stamp>DefiLlama ' + D.as_of + '</span><span class=pill>watchlist ' + D.checks.watchlist_covered + '/' + D.checks.watchlist_total + '</span></div></div></header>';
@@ -43,15 +51,20 @@ nav.map(function (n) { return '<a href="' + n[0] + '"' + (active === n[2] ? ' cl
 /** kpi(label, value, note) */
 function kpi(label, value, note) { return '<div class=kpi><span>' + label + '</span><b>' + value + '</b><em>' + note + '</em></div>'; }
 
-/** hero() */
+/** hero(): six blind-test cards, every number from the build. */
 function hero() {
-var m = D.model;
-return '<section class=hero><div><p class=kicker>Pre-token intelligence · ' + D.as_of + '</p><h1>What a token would be worth</h1><p class=dek>' +
-D.scanned + ' protocols scanned, ' + D.pre_token + ' pre-token, ' + D.watchlist_size + ' on the watchlist, ' + D.live_size + ' live tokens set aside.</p></div><div class=kpis>' +
-kpi('Watchlist covered', D.checks.watchlist_covered + '/' + D.checks.watchlist_total, 'every slug on the list') +
-kpi('Pre-token ranked', D.board_size, D.early_size + ' early rows, ' + D.watchlist_size + ' watchlist') +
-kpi('Median live multiple', mult(m.median_live_multiple), D.live_size + ' live tokens, market cap / TVL') +
-kpi('Blind test in range', Math.round(D.backtest.loo.share * 100) + '% / ' + Math.round(D.backtest.newer.share * 100) + '%', 'leave-one-out / newer, ' + D.backtest.loo.inside + '/' + D.backtest.loo.n + ' and ' + D.backtest.newer.inside + '/' + D.backtest.newer.n) +
+var v = D.tests.value, o = D.tests.odds, b = D.model.band;
+var vk = v.filter(function (t) { return t.kept; }).length, ok = o.filter(function (t) { return t.kept; }).length;
+var sector = v[2], base = o[0], finalO = o[2];
+return '<section class=hero><div><p class=kicker>Pre-token radar · ' + D.as_of + '</p><h1>What a token would be worth</h1><p class=dek>' +
+D.scanned + ' protocols scanned: ' + D.ledger.ranked + ' ranked on the board, ' + D.ledger.pre + ' more pre-token under the floor, ' + D.ledger.token + ' already trading, ' +
+D.ledger.cex + ' exchanges and ' + D.ledger.versioned + ' versioned pools set aside. Each row prices a launch, discounts it by the probability it happens, and prices the farm that pays for the attempt.</p></div><div class=kpis>' +
+kpi('Range covers', Math.round(b.cover25 * 100) + '%/' + Math.round(b.newer25 * 100) + '%', 'P25-P75, blind and newer') +
+kpi('Walk-forward miss', 'x' + Math.pow(10, sector.newer).toFixed(2), 'newest ' + b.newerN + ' tokens; flat x' + Math.pow(10, v[0].newer).toFixed(2)) +
+kpi('Odds Brier', finalO.brier.toFixed(3), 'ten-fold; base rate ' + base.brier.toFixed(3)) +
+kpi('Terms kept', vk + '/' + (v.length - 1) + ' + ' + ok + '/' + (o.length - 1), 'value and odds; both misses fall') +
+kpi('Worth farming', D.farms + '/' + D.board_size, '$25/h after fees and slippage') +
+kpi('Watchlist', D.checks.watchlist_covered + '/' + D.checks.watchlist_total, 'every slug ranked') +
 '</div></section>';
 }
 
@@ -71,7 +84,8 @@ function sortVal(r, key) {
 if (key === 'tvl') return r.tvl_usd;
 if (key === 'growth') return r.change_7d === null || r.change_7d === undefined ? -1e9 : r.change_7d;
 if (key === 'age') return r.age_days === null || r.age_days === undefined ? 1e9 : r.age_days;
-if (key === 'size') return r.size_mult;
+if (key === 'odds') return r.odds;
+if (key === 'ifl') return r.if_launched_usd;
 if (key === 'perHour') return r.farm.perHour;
 return r.implied_value_usd;
 }
@@ -92,25 +106,31 @@ return av !== bv ? (av < bv ? -state.dir : state.dir) : a.rank - b.rank;
 });
 }
 
-/** th(label, key) */
+/** th(label, key, cls) */
 function th(label, key, cls) {
 var on = state.sort === key;
-return '<th' + (cls ? ' class=' + cls : '') + '><button type=button data-sort=' + key + '>' + label + (on ? (state.dir < 0 ? ' &darr;' : ' &uarr;') : '') + '</button></th>';
+return '<th' + (cls ? ' class="' + cls + '"' : '') + '><button type=button data-sort=' + key + '>' + label + (on ? (state.dir < 0 ? ' &darr;' : ' &uarr;') : '') + '</button></th>';
 }
 
-/** thead() */
-function thead() { return '<tr><th><button type=button data-sort=implied>#</button></th><th>Protocol</th>' + th('TVL', 'tvl', 'r') + th('7d', 'growth', 'r') + th('No token', 'age', 'r') + th('Size curve', 'size', 'r') + th('Implied value', 'implied', 'r') + th('Farm $/h', 'perHour', 'r') + '</tr>'; }
+/** thead(): one row per protocol, the two legs then the product. */
+function thead() {
+return '<tr><th class=r><button type=button data-sort=implied>#</button></th><th>Protocol</th>' + th('TVL', 'tvl', 'r') + th('No token', 'age', 'r') +
+th('Token odds', 'odds', 'r oddc') + th('If it launches', 'ifl', 'r') + th('Implied value', 'implied', 'r') + th('Farm $/h', 'perHour', 'r') + '</tr>';
+}
 
 /** rowHtml(r) */
 function rowHtml(r) {
-var g = r.change_7d, w = Math.max(3, Math.round(Math.sqrt(r.implied_value_usd / (D.rows[0].implied_value_usd || 1)) * 100));
-var sub = r.category + (r.chains.length ? ' · ' + r.chains.slice(0, 2).join(', ') : '');
+var g = r.change_7d;
+function at(v) { return Math.min(100, Math.sqrt(Math.max(0, v) / IMP_MAX) * 100); }
+var lo = at(r.implied_low), hi = at(r.implied_high), pt = at(r.implied_value_usd);
+var sub = [catName(r.category)].concat(r.chains.slice(0, 2)).join(' · ') + ' · ' + pct(g);
 return '<tr data-slug="' + esc(r.slug) + '"><td class=rank>' + r.rank + '</td>' +
 '<td><div class=pname>' + esc(r.name) + '</div><div class=psub>' + esc(sub) + '</div></td>' +
-'<td class=r>' + usd(r.tvl_usd) + '</td><td class="r ' + (g === null || g === undefined ? '' : g >= 0 ? 'pos' : 'neg') + '">' + pct(g) + '</td>' +
-'<td class=r>' + age(r.age_days) + '</td><td><span class=size>' + mult(r.size_mult) + '</span></td>' +
-'<td class=imp><div class=impv>' + usd(r.implied_value_usd) + '</div><div class=impr>' + usd(r.implied_low) + ' to ' + usd(r.implied_high) + '</div><div class=impbar aria-hidden=true><i style="width:' + w + '%"></i></div></td>' +
-'<td class=farmcell><span class="chip ' + r.farm.verdict + '">' + r.farm.verdict + '</span><span class=rate>' + usd(r.farm.perHour) + '/h</span></td></tr>';
+'<td class=r>' + usd(r.tvl_usd) + '</td><td class=r>' + age(r.age_days) + '</td>' +
+'<td class="r oddc"><span class=odd>' + Math.round(r.odds * 100) + '%</span><span class=obar aria-hidden=true><i style="width:' + Math.round(r.odds * 100) + '%"></i></span></td>' +
+'<td class=r>' + usd(r.if_launched_usd) + '</td>' +
+'<td class=imp><div class=impv>' + usd(r.implied_value_usd) + '</div><div class=impr>' + usd(r.implied_low) + ' to ' + usd(r.implied_high) + '</div><div class=impbar aria-hidden=true><i class=band style="left:' + lo.toFixed(1) + '%;width:' + Math.max(0.8, hi - lo).toFixed(1) + '%"></i><i class=point style="left:' + pt.toFixed(1) + '%"></i></div></td>' +
+'<td class=farmcell title="' + esc(r.farm.play + ', ' + r.farm.verdict) + '"><span class="chip ' + r.farm.verdict + '">' + r.farm.verdict + '</span><span class=rate>' + usd(r.farm.perHour) + '/h</span></td></tr>';
 }
 
 /** rowsHtml(list) */
@@ -128,46 +148,67 @@ return '<div class=filters><div class=field><label for=q>Search</label><input id
 '<label class=check for=farms><input id=farms type=checkbox> Farms only</label><button id=clear class=btn type=button>Clear</button><span id=count class=count></span></div>';
 }
 
-/** ladder() */
-function ladder() {
-var top = D.rows.slice(0, 10), logs = top.map(function (r) { return Math.log10(r.implied_value_usd); });
-var lo = Math.min.apply(null, logs), hi = Math.max.apply(null, logs);
-return '<section class=panel><div class=ph><h2>Value ladder</h2><span>ALL 200 ROWS, TOP 10</span></div><div class=ladder>' +
-top.map(function (r, i) {
-var w = hi > lo ? 18 + 82 * ((logs[i] - lo) / (hi - lo)) : 100;
-return '<div class=lrow><span class="muted num">' + r.rank + '</span><div><div class=lname>' + esc(r.name) + '</div><div class=lbar><i style="width:' + w.toFixed(1) + '%"></i></div></div><span class=lval>' + usd(r.implied_value_usd) + '</span></div>';
-}).join('') + '</div></section>';
+/** panel(title, tag, body) */
+function panel(title, tag, body) { return '<section class=panel><div class=ph><h2>' + title + '</h2><span>' + tag + '</span></div>' + body + '</section>'; }
+
+/** modelPanel(): the two legs and their ranges. */
+function modelPanel() {
+var m = D.model, v = m.value, o = m.odds, b = m.band;
+return panel('The two legs', 'ONE BOARD, TWO BLIND TESTS',
+'<div class=formula>implied = ifLaunched(TVL, sector) x odds(age, TVL)</div>' +
+'<div class=fchips><span class=fchip><b>value</b> ' + v.n + ' dated tokens</span><span class=fchip><b>odds</b> ' + o.n + ' protocols</span>' +
+'<span class=fchip><b>P25-P75</b> ' + Math.pow(10, b.lo25).toFixed(2) + 'x–' + Math.pow(10, b.hi75).toFixed(2) + 'x</span>' +
+'<span class=fchip><b>P10-P90</b> ' + Math.pow(10, b.lo10).toFixed(2) + 'x–' + Math.pow(10, b.hi90).toFixed(2) + 'x</span></div>' +
+'<p class=tnote>The value leg fits log market cap on log TVL, plus a sector effect shrunk n/(n+' + v.cat_k + '). The odds leg is a ridge logistic on years without a token and TVL. The range is the value leg\'s own blind residual, so it can be checked.</p>');
 }
 
-/** formulaPanel() */
-function formulaPanel() {
-var m = D.model;
-function chip(name, range) { return '<span class=fchip><b>' + name + ' </b>' + range + '</span>'; }
-return '<section class=panel><div class=ph><h2>How implied value is built</h2><span>ONE FORMULA, 200 ROWS</span></div><div class=formula>implied = TVL x sizeCurve(TVL) x sector x growth x age x chains</div><div class=fchips>' +
-chip('size', mult(m.size_min) + '–' + mult(m.size_max)) + chip('sector', '0.55x–1.8x') + chip('growth', mult(m.growth_min) + '–' + mult(m.growth_max)) +
-chip('age', mult(m.age_min) + '–' + mult(m.age_max)) + chip('chains', '1x–' + mult(1 + m.chain_max)) + chip('band', '±' + m.band.toFixed(2) + ' dex') +
-'</div><p class=tnote>Theil-Sen on ' + m.comps + ' live comps: slope ' + m.slope.toFixed(2) + ', intercept ' + m.intercept.toFixed(2) + '. The range is the residual interquartile range, ' + m.band.toFixed(2) + ' dex either side.</p></section>';
+/** termRow(t, kind) */
+function termRow(t, kind) {
+var a = kind === 'value' ? 'x' + Math.pow(10, t.loo).toFixed(2) : t.brier.toFixed(3);
+var b = kind === 'value' ? 'x' + Math.pow(10, t.newer).toFixed(2) : t.newerBrier.toFixed(3);
+return '<div class=trow><span class=tname>' + esc(t.term) + '</span><span>' + a + '</span><span>' + b + '</span><span class="' + (t.kept ? 'keep' : 'drop') + '">' + (t.kept ? 'kept' : t.control ? 'control' : 'drop') + '</span></div>';
 }
 
-/** testPanel() */
-function testPanel() {
-var b = D.backtest;
-function bar(label, t) { return '<div><div class=tl><span>' + label + '</span><b>' + t.inside + '/' + t.n + ' · ' + Math.round(t.share * 100) + '%</b></div><div class=tbar><i style="width:' + (t.share * 100).toFixed(1) + '%"></i></div></div>'; }
-return '<section class=panel><div class=ph><h2>Blind tests</h2><span>SAME MODEL, HELD OUT</span></div><div class=tests>' + bar('Leave-one-out', b.loo) + bar('Newest 40%', b.newer) +
-'<p class=tnote>Median miss ' + Math.pow(10, b.loo.medianError).toFixed(1) + 'x on leave-one-out, ' + Math.pow(10, b.newer.medianError).toFixed(1) + 'x on the newest 40%. Range band ' + b.band.toFixed(2) + ' dex.</p></div><div class=tnote>Every one of the ' + D.checks.rows + ' rows is recomputed from the model and matches board.json.</div></section>';
+/** termsPanel(): the printed keep rule and every term that lost. */
+function termsPanel() {
+return panel('Terms tested', 'KEPT ONLY IF BOTH MISSES FALL',
+'<div class="trow th"><span class=tname>value term</span><span>LOO</span><span>newer</span><span></span></div>' +
+D.tests.value.map(function (t) { return termRow(t, 'value'); }).join('') +
+'<div class="trow th second"><span class=tname>odds term</span><span>Brier</span><span>newer</span><span></span></div>' +
+D.tests.odds.map(function (t) { return termRow(t, 'odds'); }).join('') +
+'<p class=tnote>Blind misses: leave-one-out, then the newest 40% by listing date. A control row sets the baseline and is not a term.</p>');
+}
+
+/** chk(text) */
+function chk(text) { return '<div class=chk><i></i>' + text + '</div>'; }
+
+/** ledgerPanel(): every protocol counted once, then six checks that can fail. */
+function ledgerPanel() {
+var l = D.ledger, c = D.checks, sum = [l.ranked, l.token, l.pre, l.cex, l.versioned].join(' + ');
+function row(k, v) { return '<div class="lrow2"><span>' + k + '</span><b>' + v + '</b></div>'; }
+return panel('Accounting, ' + D.ledger_sum, 'EVERY PROTOCOL ONCE',
+'<div class=ledger>' + row('ranked pre-token', l.ranked) + row('token trading, set aside', l.token) + row('pre-token, unranked', l.pre) + row('exchange', l.cex) + row('versioned pool', l.versioned) +
+'<div class="lrow2 total"><span>total</span><b>' + D.ledger_sum + '</b></div></div>' +
+'<div class=strip6>' + chk(c.rows_recomputed + '/' + c.rows + ' rows recomputed') + chk(c.watchlist_covered + '/' + c.watchlist_total + ' watchlist ranked') +
+chk(sum + ' = ' + D.ledger_sum) + chk(c.hardcoded_names + ' names hardcoded') + chk(c.comps_dated + ' dated comps') +
+chk(c.sorted ? 'ranks 1-' + c.rows + ' monotone' : 'ranks not monotone') + '</div>');
 }
 
 /** boardHtml() */
 function boardHtml() {
-return '<section class=shell>' + hero() + '<div class=board><section class=bmain>' + filterBar() + '<p class=caption>Ranked by implied value. Select a row for the factor waterfall and its farm plan.</p>' +
-'<div class=tablebox><table><thead id=thead>' + thead() + '</thead><tbody id=rows></tbody></table></div></section>' +
-'<aside class=side>' + ladder() + formulaPanel() + testPanel() + '</aside></div></section>';
+return '<section class=shell>' + hero() + '<div class=board><section class=bmain>' + filterBar() + '<p class=caption id=cap></p>' +
+'<div class=tablebox><table><thead id=thead>' + thead() + '</thead><tbody id=rows></tbody></table></div><p class="caption more" id=more></p></section>' +
+'<aside class=side>' + modelPanel() + termsPanel() + ledgerPanel() + '</aside></div></section>';
 }
 
 /** refreshBoard() */
 function refreshBoard() {
 var list = visibleRows();
 byId('count').textContent = list.length + ' of ' + D.board_size + ' rows';
+byId('cap').textContent = 'Ranked by implied value. Showing ' + list.length + ' of ' + D.board_size + ' ranked rows' + (state.farms ? ', only those that clear $25/h after fees' : '') +
+'. Bars are scaled to implied value; the pale tail under each is the value leg\'s P25-P75 range.';
+var more = byId('more');
+if (more) more.textContent = list.length > 14 ? (list.length === D.board_size ? 'All ' + D.board_size + ' rows are in the table: scroll inside it for the rest, same columns.' : 'Scroll inside the table for the remaining ' + (list.length - 14) + ' rows.') : (list.length === 0 ? '' : list.length + ' rows here; open any one for its eight-step farm plan, the costs behind the net figure and its nearest comps.');
 byId('thead').innerHTML = thead();
 byId('rows').innerHTML = rowsHtml(list);
 }
@@ -218,166 +259,120 @@ byId('rows').addEventListener('keydown', function (e) { if (e.key === 'Enter' ||
 refreshBoard();
 }
 
-/** factorWidth(f): bar width in percent; 1x is half the track, 1.51x is three quarters. */
-function factorWidth(f) { return Math.max(2, Math.min(100, 50 * f)); }
-
-/** waterfall(row): factor bars scaled from 1x, TVL and implied value full width. */
+/** waterfall(row): TVL, the launch value, the odds, and the product. */
 function waterfall(row) {
+var tvl = row.tvl_usd, ifl = row.if_launched_usd, imp = row.implied_value_usd;
+function scale(v) { return Math.max(3, Math.min(100, (v / tvl) * 100)); }
 var rows = [
-['TVL', usd(row.tvl_usd), 'reported on ' + D.as_of, 100],
-['Size curve', mult(row.size_mult), 'Theil-Sen fit, ' + D.model.comps + ' comps, slope ' + D.model.slope.toFixed(2), factorWidth(row.size_mult)],
-['Sector', mult(row.sector_mult), row.category + ', ' + dex(row.sector_effect) + ' residual', factorWidth(row.sector_mult)],
-['7d growth', mult(row.growth_mult), pct(row.change_7d) + ' vs ' + pct(row.sector_median) + ' sector median', factorWidth(row.growth_mult)],
-['Time with no token', mult(row.age_mult), row.age_days === null ? 'no listing date' : row.age_days + ' days on record', factorWidth(row.age_mult)],
-['Chains', mult(row.chain_mult), row.chains.length + ' chain' + (row.chains.length === 1 ? '' : 's') + ': ' + row.chains.join(', '), factorWidth(row.chain_mult)]
+['TVL today', usd(tvl), 'snapshot ' + D.as_of, 100],
+['If it launches', usd(ifl), 'log fit on TVL and sector', scale(ifl)],
+['Odds it launches', Math.round(row.odds * 100) + '%', 'logistic on age and TVL', Math.round(row.odds * 100)],
+['Implied value', usd(imp), 'launch value x odds', scale(imp)]
 ];
-return '<div class=wf>' + rows.map(function (r) {
-return '<div class=wrow><div class=wlab><b>' + r[0] + '</b><span>' + esc(r[2]) + '</span></div><div class=wbar><i style="width:' + r[3] + '%"></i><span class=tick></span></div><div class=wval>' + r[1] + '</div></div>';
-}).join('') + '<div class="wrow last"><div class=wlab><b>Implied value</b><span>range ' + usd(row.implied_low) + ' to ' + usd(row.implied_high) + '</span></div><div class=wbar><i style="width:100%"></i></div><div class=wval>' + usd(row.implied_value_usd) + '</div></div></div>' +
-'<p class=caption>Bar scale: 1x is half the track, 0.2x is a fifth of the 1x bar, 1.51x is three quarters. TVL and implied value are full width.</p>';
+return '<div class=wf>' + rows.map(function (r, i) {
+return '<div class="wrow' + (i === 3 ? ' last' : '') + '"><div class=wlab><b>' + r[0] + '</b><span>' + esc(r[2]) + '</span></div><div class=wbar><i style="width:' + r[3].toFixed(1) + '%"></i></div><div class=wval>' + r[1] + '</div></div>';
+}).join('') + '</div><p class=caption>Rows 1, 2 and 4 share one money scale; row 3 is the probability. The value leg is fitted on ' + D.model.value.n + ' dated tokens, the odds leg on ' + D.model.odds.n + ' protocols. ' + (ifl / tvl).toFixed(2) + ' x ' + row.odds.toFixed(2) + ' = ' + (imp / tvl).toFixed(2) + ' of TVL.</p>';
 }
 
 /** compStrip(row) */
 function compStrip(row) {
 var values = [row.implied_low, row.implied_high, row.implied_value_usd].concat(row.comps.map(function (c) { return c.mcap_usd; })).filter(function (v) { return v > 0; });
 var lo = Math.min.apply(null, values), hi = Math.max.apply(null, values), a = Math.log10(lo), b = Math.log10(hi);
-function pos(v) { return b <= a ? 50 : Math.max(1, Math.min(99, ((Math.log10(Math.max(v, lo)) - a) / (b - a)) * 100)); }
-var left = pos(row.implied_low), width = Math.max(1, pos(row.implied_high) - left);
-return '<div class=strip><div class=band style="left:' + left + '%;width:' + width + '%"></div>' +
-row.comps.map(function (c) { return '<div class=dot style="left:' + pos(c.mcap_usd) + '%"></div>'; }).join('') +
-'<div class=mark style="left:' + pos(row.implied_value_usd) + '%"></div></div>' +
+function pos(v) {
+var f = b <= a ? 0.5 : (Math.log10(Math.max(v, lo)) - a) / (b - a);
+return 4 + 92 * Math.max(0, Math.min(1, f));
+}
+var left = pos(row.implied_low), width = Math.max(1.5, pos(row.implied_high) - left);
+return '<div class=strip><div class=band style="left:' + left.toFixed(2) + '%;width:' + width.toFixed(2) + '%"></div>' +
+row.comps.map(function (c) { return '<div class=dot style="left:' + pos(c.mcap_usd).toFixed(2) + '%"></div>'; }).join('') +
+'<div class=mark style="left:' + pos(row.implied_value_usd).toFixed(2) + '%"></div></div>' +
 '<div class=axis><span>' + usd(lo) + '</span><span>market cap, log scale</span><span>' + usd(hi) + '</span></div>';
 }
 
 /** compsTable(row) */
 function compsTable(row) {
 return '<table class="dtable"><thead><tr><th>Comp</th><th>Sector</th><th class=r>TVL</th><th class=r>Cap</th><th class=r>Multiple</th></tr></thead><tbody>' +
-row.comps.map(function (c) { return '<tr><td>' + esc(c.name) + '</td><td class=muted>' + esc(c.category) + '</td><td class=r>' + usd(c.tvl_usd) + '</td><td class=r>' + usd(c.mcap_usd) + '</td><td class=r>' + mult(c.multiple) + '</td></tr>'; }).join('') +
+row.comps.map(function (c) { return '<tr><td>' + esc(c.name) + '</td><td class=muted>' + esc(catName(c.category)) + '</td><td class=r>' + usd(c.tvl_usd) + '</td><td class=r>' + usd(c.mcap_usd) + '</td><td class=r>' + mult(c.multiple) + '</td></tr>'; }).join('') +
 '</tbody></table>';
 }
 
-var STEP_NAMES = ['Verify', 'Bridge and fund', 'Enter', 'Qualify', 'Upkeep', 'Stop rule', 'Exit', 'Claim'];
-var STEP_DAYS = [0, 0, 1, 7, 14, 30, 80, 90];
-
-/** timeline(farm) */
-function timeline(farm) {
-return '<ol class=timeline>' + farm.steps.map(function (s, i) {
+/** planTable(farm): WHEN, STEP, COST, TIME, one row per step. */
+function planTable(farm) {
+return '<table class=plan><thead><tr><th>When</th><th>Step</th><th class=r>Cost</th><th class=r>Time</th></tr></thead><tbody>' +
+farm.steps.map(function (s, i) {
 var m = / Cost: \$([0-9.]+)\. Time: (\d+) min\.$/.exec(s);
 var body = s.replace(/ Cost: \$[0-9.]+\. Time: \d+ min\.$/, '');
-return '<li><span class=day>Day ' + STEP_DAYS[i] + '</span><b>' + STEP_NAMES[i] + '</b><span class=ct>$' + (m ? m[1] : '0') + ' · ' + (m ? m[2] : '0') + ' min</span><p>' + esc(body) + '</p></li>';
-}).join('') + '</ol>';
+return '<tr><td class=when>Day ' + STEP_DAYS[i] + '</td><td><b>' + STEP_NAMES[i] + '</b><p>' + esc(body) + '</p></td><td class=r>$' + (m ? m[1] : '0') + '</td><td class=r>' + (m ? m[2] : '0') + ' min</td></tr>';
+}).join('') + '</tbody></table>';
 }
 
-/** costsTable(farm) */
+/** costsTable(farm): the same three costs the plan rows print, summed. */
 function costsTable(farm) {
-var slip = farm.ticket * 0.003, bridge = farm.cost - slip;
-return '<table class=costs><tbody><tr><td>Bridge and gas</td><td>' + usd2(bridge) + '</td></tr><tr><td>Slippage on ' + usd(farm.ticket) + ' ticket</td><td>' + usd2(slip) + '</td></tr><tr class=total><td>Total cost</td><td>' + usd2(farm.cost) + '</td></tr></tbody></table>';
+var slip = farm.ticket * 0.003;
+return '<table class=costs><tbody><tr><td>Bridge and funding gas</td><td>' + usd2(farm.bridge) + '</td></tr>' +
+'<tr><td>Slippage on ' + usd(farm.ticket) + ' ticket</td><td>' + usd2(slip) + '</td></tr>' +
+'<tr><td>Upkeep and exit gas</td><td>' + usd2(farm.upkeep + farm.exit) + '</td></tr>' +
+'<tr class=total><td>Total cost</td><td>' + usd2(farm.cost) + '</td></tr></tbody></table>';
 }
 
 /** ktiles(farm) */
 function ktiles(farm) {
 function tile(label, value) { return '<div class=ktile><span>' + label + '</span><b>' + value + '</b></div>'; }
-return '<div class=ktiles>' + tile('Expected at launch', usd(farm.expected)) + tile('Cost', usd2(farm.cost)) + tile('Net', usd(farm.net)) + tile('Net per hour', usd(farm.perHour) + '/h') + '</div>';
+return '<div class=ktiles>' + tile('Expected at launch', usd(farm.expected)) + tile('Cost', usd2(farm.cost)) + tile('Net', usd(farm.net)) + tile('Net / hour', usd(farm.perHour)) + '</div>';
 }
 
-/** hoursText(min): 132 minutes reads as 2 h 12 min. */
-function hoursText(min) { var h = Math.floor(min / 60), m = min % 60; return h + ' h' + (m ? ' ' + m + ' min' : ''); }
+/** verdictBox(row): why this row carries its verdict, and what would move it. */
+function verdictBox(row) {
+var f = row.farm, perHourFloor = 25;
+var need = (perHourFloor * f.hours + f.cost) * row.tvl_usd / (D.model.pool_share * f.ticket);
+var half = f.expected / 2 - f.cost, halfHour = half / f.hours;
+return '<div class=vrule><b class=vtag>' + f.verdict + '</b><p>FARM needs a positive net and at least ' + usd(perHourFloor) + '/h of work. This row nets ' + usd(f.net) + ' over ' + hoursText(f.timeMin) + ', or ' + usd(f.perHour) + '/h.</p></div>' +
+'<ul class=vlist>' +
+'<li>At a 1.5% pool share instead of ' + Math.round(D.model.pool_share * 100) + '%, the net falls to ' + usd(half) + ' (' + usd(halfHour) + '/h), which is THIN.</li>' +
+'<li>An implied value under ' + usd(need) + ' takes the rate below ' + usd(perHourFloor) + '/h.</li>' +
+'<li>A ticket is never more than 1% of TVL, so this ' + usd(f.ticket) + ' ticket needs TVL above ' + usd(100 * f.ticket) + '.</li>' +
+'</ul>';
+}
 
 /** detailHtml(slug) */
 function detailHtml(slug) {
 var row = D.rows.filter(function (r) { return r.slug === slug; })[0];
-if (!row) return '<section class="shell detail"><a class=back href="#/">&#8592; Back to the board</a><p class=caption>No row has that slug. It may be outside the 200 ranked rows.</p></section>';
+if (!row) return '<section class="shell detail"><a class=back href="#/">&larr; Back to the board</a><p class=caption>No row has that slug. It may be outside the 200 ranked rows.</p></section>';
 var chains = row.chains.length ? row.chains.join(', ') : 'an unnamed chain';
-return '<section class="shell detail"><a class=back href="#/">&#8592; Back to the board</a><div class=dhead><div><p class=kicker>Protocol dossier</p><h1>' + esc(row.name) + '</h1><p class=dmeta>Rank ' + row.rank + ' of ' + D.board_size + ', ' + esc(row.category) + ', ' + esc(chains) + ', TVL ' + usd(row.tvl_usd) + ', no token on record for ' + ageWords(row.age_days) + '.</p><p class=dmeta>Farm plan: ' + usd(row.farm.ticket) + ' ticket, expected ' + usd(row.farm.expected) + ', cost ' + usd2(row.farm.cost) + ', net ' + usd(row.farm.net) + ', ' + usd(row.farm.perHour) + '/h, total time ' + hoursText(row.farm.timeMin) + '.</p></div>' +
-'<div class=dval><span class=lab>Implied value</span><span class=big>' + usd(row.implied_value_usd) + '</span><span class=rng>' + usd(row.implied_low) + ' to ' + usd(row.implied_high) + '</span></div></div>' +
-'<div class=dgrid><div class=dcol><h2>Factor waterfall</h2><p class=caption>Each factor multiplies the one above; the last bar is the rounded implied value.</p>' + waterfall(row) +
-'<h2 style="margin-top:28px">Nearest comps</h2><p class=caption>The three live protocols closest in TVL. The shaded band is the implied range; the rule is this row.</p>' + compStrip(row) + compsTable(row) +
-'<h2 style="margin-top:28px">Farm economics</h2>' + ktiles(row.farm) + '</div>' +
-'<div class=dcol><h2>Farm plan</h2><p class=caption>' + esc(row.farm.play) + ' · ' + row.farm.windowDays + ' days · ' + usd(row.farm.ticket) + ' ticket · ' + row.farm.hours + ' hours</p>' + timeline(row.farm) +
-'<h2 style="margin-top:20px">Cost</h2>' + costsTable(row.farm) +
-'<p class=risk>A launch is not promised. The expected value is 1.5% of the ticket at the implied price, and that allocation would be shared across every farmer. The stop rule exits if TVL falls 20% or seven-day growth drops below -30%. Window: ' + row.farm.windowDays + ' days.</p></div></div></section>';
-}
-
-/** campaign(capital, weeklyHours) */
-function campaign(capital, weeklyHours) {
-var timeLeft = weeklyHours * (D.model.window_days / 7), moneyLeft = capital, picked = [];
-var ranked = D.rows.slice().sort(function (a, b) { return b.farm.perHour !== a.farm.perHour ? b.farm.perHour - a.farm.perHour : a.rank - b.rank; });
-ranked.some(function (r) {
-if (picked.length >= 10 || r.farm.hours > timeLeft) return true;
-if (r.farm.ticket > moneyLeft) return false;
-picked.push(r); moneyLeft -= r.farm.ticket; timeLeft -= r.farm.hours;
-return picked.length >= 10;
-});
-return picked;
-}
-
-/** plannerBody(capital, weeklyHours) */
-function plannerBody(capital, weeklyHours) {
-var picked = campaign(capital, weeklyHours);
-var s = picked.reduce(function (a, r) { a.ticket += r.farm.ticket; a.cost += r.farm.cost; a.expected += r.farm.expected; a.net += r.farm.net; a.hours += r.farm.hours; return a; }, { ticket: 0, cost: 0, expected: 0, net: 0, hours: 0 });
-var per = s.hours > 0 ? s.net / s.hours : 0;
-var tiles = '<div class=sum><div><span>Capital deployed</span><b>' + usd(s.ticket) + '</b></div><div><span>Cost</span><b>' + usd(s.cost) + '</b></div><div><span>Expected</span><b>' + usd(s.expected) + '</b></div><div><span>Net</span><b>' + usd(s.net) + '</b></div><div><span>Net per hour</span><b>' + usd(per) + '/h</b></div></div>';
-if (picked.length === 0) return tiles + '<p class=caption>No farm fits that capital and time. Raise either budget.</p>';
-var rows = picked.map(function (r) {
-return '<tr><td class=num>' + r.rank + '</td><td><b>' + esc(r.name) + '</b><div class=psub>' + esc(r.category) + '</div></td><td>' + esc(r.farm.play) + '</td><td class=r>' + usd(r.farm.ticket) + '</td><td class=r>' + usd(r.farm.cost) + '</td><td class=r>' + r.farm.hours + ' h</td><td class=r>' + usd(r.farm.expected) + '</td><td class=r>' + usd(r.farm.net) + '</td><td class=r>' + usd(r.farm.perHour) + '/h</td></tr>';
-}).join('');
-return tiles + '<table class=ptable><thead><tr><th>#</th><th>Protocol</th><th>Play</th><th class=r>Ticket</th><th class=r>Cost</th><th class=r>Hours</th><th class=r>Expected</th><th class=r>Net</th><th class=r>Per hour</th></tr></thead><tbody>' + rows +
-'<tr class=total><td colspan=3><b>Total</b> <span class=muted>' + picked.length + ' positions</span></td><td class=r>' + usd(s.ticket) + '</td><td class=r>' + usd(s.cost) + '</td><td class=r>' + s.hours.toFixed(1) + ' h</td><td class=r>' + usd(s.expected) + '</td><td class=r>' + usd(s.net) + '</td><td class=r>' + usd(per) + '/h</td></tr></tbody></table>';
-}
-
-/** plannerHtml() */
-function plannerHtml() {
-return '<section class="shell page"><div class=phead><div><p class=kicker>Planner · ' + D.model.window_days + '-day window</p><h1>Campaign planner</h1><p class=dek>Spend the capital and the time you actually have, best net per hour first. Each position takes a ticket of ' + usd(D.model.tickets[0]) + ' to ' + usd(D.model.tickets[D.model.tickets.length - 1]) + ', never more than 1% of its TVL, and ' + D.model.hours + ' hours.</p></div>' +
-'<p class=caption>The board\u2019s top farm pays ' + usd(D.rows[0].farm.perHour) + '/h in the model. The planner caps the campaign at ten positions.</p></div>' +
-'<div class=pcontrols><div><label for=cap>Capital</label><input id=cap type=range min=5000 max=50000 step=2500 value=50000><b id=capval class=val></b></div>' +
-'<div><label for=hrs>Your time</label><input id=hrs type=range min=1 max=10 step=1 value=6><b id=hrsval class=val></b></div></div><div id=plan></div>' +
-'<p class=plnote>Time available is the weekly hours times ' + (D.model.window_days / 7).toFixed(1) + ' weeks. The planner buys the highest net-per-hour rows while both budgets last; a row that cannot pay its ticket is skipped, and the ten-position cap keeps the work finite.</p></section>';
-}
-
-/** wirePlanner() */
-function wirePlanner() {
-var cap = byId('cap'), hrs = byId('hrs');
-function draw() {
-var capital = Number(cap.value), weekly = Number(hrs.value);
-byId('capval').textContent = usd(capital);
-byId('hrsval').textContent = weekly + ' h / week';
-byId('plan').innerHTML = plannerBody(capital, weekly);
-}
-cap.addEventListener('input', draw);
-hrs.addEventListener('input', draw);
-draw();
-}
-
-/** asideHtml() */
-function asideHtml() {
-var rows = D.live.map(function (r) {
-return '<tr><td><b>' + esc(r.name) + '</b><div class=psub>' + esc(r.chains.length ? r.chains.slice(0, 2).join(', ') : 'an unnamed chain') + '</div></td><td class=r>' + usd(r.tvl_usd) + '</td><td class=r>' + usd(r.mcap_usd) + '</td><td class=r>' + mult(r.multiple) + '</td><td>' + esc(r.category) + '</td></tr>';
-}).join('');
-return '<section class="shell page"><div class=phead><div><p class=kicker>Set aside · ' + D.live_size + ' live tokens</p><h1>Already trading</h1></div><p class=dek>These protocols have a token and a market cap, so their number is a fact, not a model. They are the comps the size curve learns from and are kept out of the 200-row ranking.</p></div>' +
-'<table class=ptable style="margin-top:18px"><thead><tr><th>Protocol</th><th class=r>TVL</th><th class=r>Market cap</th><th class=r>Multiple</th><th>Sector</th></tr></thead><tbody>' + rows + '</tbody></table></section>';
+var recon = 'Ticket ' + usdC(row.farm.ticket) + ' + cost ' + usd2(row.farm.cost) + ' = ' + usdC(row.farm.ticket + row.farm.cost) + ' at risk. Expected ' + usd(row.farm.expected) + ' at launch. Net ' + usd(row.farm.net) + ' over ' + hoursText(row.farm.timeMin) + ', ' + usd(row.farm.perHour) + '/h. Verdict ' + row.farm.verdict + '.';
+return '<section class="shell detail"><a class=back href="#/">&larr; Back to the board</a><div class=dhead><div><p class=kicker>Protocol dossier &middot; rank ' + row.rank + ' of ' + D.board_size + '</p><h1>' + esc(row.name) + '</h1>' +
+'<p class=dmeta>' + esc(catName(row.category)) + ' &middot; ' + esc(chains) + ' &middot; TVL ' + usd(row.tvl_usd) + ' &middot; seven-day ' + pct(row.change_7d) + ' &middot; no token for ' + ageWords(row.age_days) + '.</p>' +
+'<p class=dmeta>Farm plan: ' + usd(row.farm.ticket) + ' ticket, expected ' + usd(row.farm.expected) + ', cost ' + usd2(row.farm.cost) + ', net ' + usd(row.farm.net) + ', ' + usd(row.farm.perHour) + '/h, ' + hoursText(row.farm.timeMin) + ' of work.</p></div>' +
+'<div class=dval><span class=lab>Implied value</span><span class=big>' + usd(row.implied_value_usd) + '</span><span class=rng>' + usd(row.implied_low) + ' to ' + usd(row.implied_high) + ' &middot; P25-P75</span></div></div>' +
+'<div class=dgrid><div class=dcol><h2>How the number is built</h2><p class=caption>Launch value from the value leg, odds from the odds leg, range from the value leg\'s blind P25-P75.</p>' + waterfall(row) +
+'<h2 class=gap>Farm plan</h2><p class=caption>' + esc(row.farm.play) + ' &middot; ' + row.farm.windowDays + ' days &middot; ' + usd(row.farm.ticket) + ' ticket &middot; ' + hoursText(row.farm.timeMin) + ' of work</p>' + planTable(row.farm) +
+'<p class=risk>A launch is not promised. Expected value assumes farmers receive ' + Math.round(D.model.pool_share * 100) + '% of the implied value, shared pro rata across the protocol\'s TVL, and that pool is shared with every other farmer. Window: ' + row.farm.windowDays + ' days.</p>' +
+'<p class=recon>' + recon + '</p></div>' +
+'<div class=dcol><h2>Farm economics</h2>' + ktiles(row.farm) +
+'<h2 class=gap>Cost</h2>' + costsTable(row.farm) +
+'<h2 class=gap>Verdict rule</h2>' + verdictBox(row) +
+'<h2 class=gap>Nearest comps</h2><p class=caption>The three live protocols closest in TVL. The band is this row\'s P25-P75 implied range; each dot is a comp\'s market cap.</p>' + compStrip(row) + compsTable(row) + '</div></div></section>';
 }
 
 /** route() */
 function route() {
 var h = window.location.hash || '#/';
 if (h.indexOf('#/p/') === 0) return { view: 'detail', slug: decodeURIComponent(h.slice(4)) };
-if (h.indexOf('#/planner') === 0) return { view: 'planner' };
-if (h.indexOf('#/aside') === 0) return { view: 'aside' };
+if (h.indexOf('#/farms') === 0) return { view: 'farms' };
 return { view: 'board' };
 }
 
 /** render() */
 function render() {
 var r = route();
-app.innerHTML = topbar(r.view) + (r.view === 'detail' ? detailHtml(r.slug) : r.view === 'planner' ? plannerHtml() : r.view === 'aside' ? asideHtml() : boardHtml());
-if (r.view === 'board') { wireBoard(); fitBoard(); }
-else if (r.view === 'planner') wirePlanner();
+state.farms = r.view === 'farms';
+app.innerHTML = topbar(r.view) + (r.view === 'detail' ? detailHtml(r.slug) : boardHtml());
+if (r.view !== 'detail') { wireBoard(); fitBoard(); }
 app.setAttribute('aria-busy', 'false');
-if (r.view !== 'board') window.scrollTo(0, 0);
+if (r.view === 'detail') window.scrollTo(0, 0);
 }
 
-window.addEventListener('resize', function () { if (route().view === 'board') fitBoard(); });
-
+window.addEventListener('resize', function () { if (route().view !== 'detail') fitBoard(); });
 window.addEventListener('hashchange', render);
 render();
 })();
