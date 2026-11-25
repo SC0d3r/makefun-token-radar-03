@@ -408,7 +408,7 @@ var covered = snapshot.watchlist.filter(function (s) { return board.some(functio
 var ledger = ledgerOf(snapshot, board);
 var ledgerSum = LEDGER_KEYS.reduce(function (a, k) { return a + ledger[k]; }, 0);
 var farms = board.filter(function (row) { return row.farm.verdict === 'FARM'; }).length;
-var live = snapshot.protocols.filter(function (p) { return p.mcap_usd !== null; }).map(function (p) {
+var live = snapshot.protocols.filter(function (p) { return p.mcap_usd !== null && p.category !== 'CEX' && !VERSIONED.test(p.name); }).map(function (p) {
 return { slug: p.slug, name: p.name, category: p.category || 'Other', chains: p.chains || [], tvl_usd: p.tvl_usd,
 mcap_usd: p.mcap_usd, change_7d: p.change_7d === undefined ? null : p.change_7d, multiple: multipleOf(p) };
 }).sort(function (a, b) { return b.mcap_usd !== a.mcap_usd ? b.mcap_usd - a.mcap_usd : a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0; });

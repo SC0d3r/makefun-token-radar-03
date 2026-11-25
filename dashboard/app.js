@@ -1,11 +1,11 @@
-// Launch Ledger's page: the board, one protocol's dossier and the farm-only view. No network, no clock,
-// no randomness. Every figure is a value the model published in data.js.
+// Launch Ledger's page: the board, the live-token set-aside, one protocol's dossier and the farm view.
+// No network, no clock, no randomness. Every figure is a value the model published in data.js.
 (function () {
 'use strict';
 var D = window.RADAR, M = window.RadarModel;
 if (!D || !M) return;
 var app = document.getElementById('app');
-var state = { q: '', sector: 'all', chain: 'all', growth: 'all', farms: false, sort: 'implied', dir: -1 };
+var state = { q: '', sector: 'all', chain: 'all', growth: 'all', verdict: 'all', sort: 'implied', dir: -1 };
 var FOCUS = (D.rows.filter(function (r) { return r.farm.verdict === 'FARM'; })[0] || D.rows[0]).slug;
 var IMP_MAX = Math.max.apply(null, D.rows.map(function (r) { return r.implied_high || 1; })) || 1;
 var STEP_NAMES = ['Verify', 'Bridge and fund', 'Enter', 'Qualify', 'Upkeep', 'Stop rule', 'Exit', 'Claim'];
@@ -42,7 +42,7 @@ function hoursText(min) { var h = Math.floor(min / 60), m = min % 60; return h +
 
 /** topbar(active) */
 function topbar(active) {
-var nav = [['#/', 'Board', 'board'], ['#/p/' + FOCUS, 'Detail', 'detail'], ['#/farms', 'Farms', 'farms']];
+var nav = [['#/', 'Board', 'board'], ['#/live', 'Live tokens', 'live'], ['#/p/' + FOCUS, 'Detail', 'detail'], ['#/farms', 'Farms', 'farms']];
 return '<header class=topbar><div class=topbar-in><a class=wordmark href="#/"><i></i>LAUNCH LEDGER</a><nav class=topnav>' +
 nav.map(function (n) { return '<a href="' + n[0] + '"' + (active === n[2] ? ' class=on' : '') + '>' + n[1] + '</a>'; }).join('') +
 '</nav><div class=topright><span class=stamp>DefiLlama ' + D.as_of + '</span><span class=pill>watchlist ' + D.checks.watchlist_covered + '/' + D.checks.watchlist_total + '</span></div></div></header>';
@@ -55,17 +55,17 @@ function kpi(label, value, note) { return '<div class=kpi><span>' + label + '</s
 function hero() {
 var v = D.tests.value, o = D.tests.odds, b = D.model.band;
 var vk = v.filter(function (t) { return t.kept; }).length, ok = o.filter(function (t) { return t.kept; }).length;
-var total = D.rows.reduce(function (a, r) { return a + r.implied_value_usd; }, 0);
 var sector = v[2], base = o[0], finalO = o[2];
 return '<section class=hero><div><p class=kicker>Pre-token radar · ' + D.as_of + '</p><h1>What a token would be worth</h1><p class=dek>' +
-D.scanned + ' protocols scanned: ' + D.ledger.ranked + ' ranked on the board, ' + D.ledger.pre + ' more pre-token under the floor, ' + D.ledger.token + ' already trading, ' +
-D.ledger.cex + ' exchanges and ' + D.ledger.versioned + ' versioned pools set aside. Each row prices a launch, discounts it by the probability it happens, and prices the farm that pays for the attempt.</p></div><div class=kpis>' +
-kpi('Implied range', Math.round(b.cover25 * 100) + '%/' + Math.round(b.newer25 * 100) + '%', 'P25-P75: in-sample / newest ' + b.newerN + ', both blind') +
-kpi('Error vs flat', 'x' + Math.pow(10, sector.newer).toFixed(2), 'walk-forward, newest ' + b.newerN + ' tokens; flat model x' + Math.pow(10, v[0].newer).toFixed(2)) +
-kpi('Launch odds', 'Brier ' + finalO.brier.toFixed(3), 'ten-fold; ' + base.brier.toFixed(3) + ' if we guessed the base rate') +
-kpi('Blind tests kept', (vk + ok) + '/' + (v.length - 1 + o.length - 1), 'value ' + vk + '/' + (v.length - 1) + ', odds ' + ok + '/' + (o.length - 1) + '; misses listed in source') +
-kpi('Farms over $25/h', D.farms + '/' + D.board_size, 'after gas, slippage and 2.2 h hands-on') +
-kpi('Board implied value', usd(total), 'sum of the ' + D.board_size + ' rows; launch value x odds') +
+D.scanned + ' protocols scanned: ' + D.ledger.ranked + ' ranked on the board, ' + D.ledger.pre + ' more pre-token under the floor, ' + D.ledger.token + ' record a token' +
+(D.live_size ? ' (' + D.live_size + ' with a market cap, set aside on <a href="#/live">Live tokens</a>)' : '') +
+', ' + D.ledger.cex + ' exchanges and ' + D.ledger.versioned + ' versioned pools set aside. Each row prices a launch, discounts it by the probability it happens, and prices the farm that pays for the attempt.</p></div><div class=kpis>' +
+kpi('Is the range honest?', Math.round(b.cover25 * 100) + '%/' + Math.round(b.newer25 * 100) + '%', 'inside P25-P75, stated 50%; in-sample / newest ' + b.newerN + ' blind') +
+kpi('Out-of-sample miss', 'x' + Math.pow(10, sector.newer).toFixed(2), 'walk-forward, newest ' + b.newerN + '; a flat multiple misses by x' + Math.pow(10, v[0].newer).toFixed(2)) +
+kpi('Launch odds', Math.round(finalO.newerRight * 100) + '% right', 'vs ' + Math.round(base.newerRight * 100) + '% base rate, newest ' + finalO.newerN + '; Brier ' + finalO.newerBrier.toFixed(3)) +
+kpi('Blind tests kept', vk + ' of ' + (v.length - 1) + ' · ' + ok + ' of ' + (o.length - 1), 'value · odds; every term and miss is listed below') +
+kpi('Farms over $25/h', D.farms + '/' + D.board_size, 'net of gas, slippage and ' + D.model.hours + ' h hands-on; filter to FARM') +
+kpi('Watchlist ranked', D.checks.watchlist_covered + ' / ' + D.checks.watchlist_total, 'plus ' + D.early_size + ' pre-token protocols below the $' + Math.round(D.floor_usd / 1e6) + 'M floor') +
 '</div></section>';
 }
 
@@ -95,7 +95,7 @@ return r.implied_value_usd;
 function visibleRows() {
 var q = state.q.trim().toLowerCase();
 var list = D.rows.filter(function (r) {
-if (state.farms && r.farm.verdict !== 'FARM') return false;
+if (state.verdict !== 'all' && r.farm.verdict !== state.verdict) return false;
 if (state.sector !== 'all' && r.category !== state.sector) return false;
 if (state.chain !== 'all' && r.chains.indexOf(state.chain) < 0) return false;
 if (!growthPass(r.change_7d)) return false;
@@ -124,19 +124,27 @@ function rowHtml(r) {
 var g = r.change_7d;
 function at(v) { return Math.min(100, Math.sqrt(Math.max(0, v) / IMP_MAX) * 100); }
 var lo = at(r.implied_low), hi = at(r.implied_high), pt = at(r.implied_value_usd);
-var sub = state.farms ? esc(r.farm.play) + ' · cost ' + usd2(r.farm.cost) + ' · ' + hoursText(r.farm.timeMin) : (g === null || g === undefined ? 'no 7d' : pct(g) + ' 7d') + ' · ' + [catName(r.category)].concat(r.chains.slice(0, 2)).join(' · ');
+var sub = state.verdict === 'FARM' ? esc(r.farm.play) + ' · cost ' + usd2(r.farm.cost) + ' · ' + hoursText(r.farm.timeMin) : (g === null || g === undefined ? 'no 7d' : pct(g) + ' 7d') + ' · ' + [catName(r.category)].concat(r.chains.slice(0, 2)).join(' · ');
 return '<tr data-slug="' + esc(r.slug) + '"><td class=rank>' + r.rank + '</td>' +
 '<td><div class=pname>' + esc(r.name) + '</div><div class=psub>' + esc(sub) + '</div>' + '</td>' +
 '<td class=r>' + usd(r.tvl_usd) + '</td><td class=r>' + age(r.age_days) + '</td>' +
 '<td class="r oddc"><span class=odd>' + Math.round(r.odds * 100) + '%</span><span class=obar aria-hidden=true><i style="width:' + Math.round(r.odds * 100) + '%"></i></span></td>' +
 '<td class=r>' + usd(r.if_launched_usd) + '</td>' +
 '<td class=imp><div class=impv>' + usd(r.implied_value_usd) + '</div><div class=impr>' + usd(r.implied_low) + ' to ' + usd(r.implied_high) + '</div><div class=impbar aria-hidden=true><i class=band style="left:' + lo.toFixed(1) + '%;width:' + Math.max(0.8, hi - lo).toFixed(1) + '%"></i><i class=point style="left:' + pt.toFixed(1) + '%"></i></div></td>' +
-'<td class=farmcell title="' + esc(r.farm.play + ', ' + r.farm.verdict) + '"><span class="chip ' + r.farm.verdict + '">' + r.farm.verdict + '</span><span class=rate>' + usd(r.farm.perHour) + '/h</span></td></tr>';
+'<td class=farmcell title="' + esc(r.farm.play + ', ' + r.farm.verdict) + '"><span class="chip ' + r.farm.verdict + '">' + r.farm.verdict + '</span><span class=rate>' + usd(r.farm.net) + ' · ' + usd(r.farm.perHour) + '/h</span></td></tr>';
 }
 
 /** rowsHtml(list) */
 function rowsHtml(list) {
 return list.length === 0 ? '<tr><td colspan=8 class=caption>No row matches these filters. Clear one to widen the ledger.</td></tr>' : list.map(rowHtml).join('');
+}
+
+/** verdictBar(): the four verdict counts, always visible, so the farms are one click away. */
+function verdictBar() {
+var c = { FARM: 0, THIN: 0, SKIP: 0 };
+D.rows.forEach(function (r) { c[r.farm.verdict] = (c[r.farm.verdict] || 0) + 1; });
+function b(v, label) { return '<a class="vbtn' + (state.verdict === v ? ' on' : '') + '" data-v=' + v + ' href="#/v/' + v + '">' + label + '</a>'; }
+return '<div class=field><span class=vlabel>Farm verdict</span><div class=vchips>' + b('all', 'All ' + D.board_size) + b('FARM', 'FARM ' + c.FARM) + b('THIN', 'THIN ' + c.THIN) + b('SKIP', 'SKIP ' + c.SKIP) + '</div></div>';
 }
 
 /** filterBar() */
@@ -146,7 +154,7 @@ return '<div class=filters><div class=field><label for=q>Search</label><input id
 '<div class=field><label for=sector>Sector</label><select id=sector>' + options(D.sectors, 'All sectors') + '</select></div>' +
 '<div class=field><label for=chain>Chain</label><select id=chain>' + options(D.chains, 'All chains') + '</select></div>' +
 '<div class=field><label for=growth>Growth</label><select id=growth><option value=all>Any growth</option><option value=up20>Up 20% or more</option><option value=up>Up</option><option value=down>Down</option><option value=down20>Down 20% or more</option><option value=unknown>No 7d print</option></select></div>' +
-'<label class=check for=farms><input id=farms type=checkbox> Farms only</label><button id=clear class=btn type=button>Clear</button><span id=count class=count></span></div>';
+verdictBar() + '<button id=clear class=btn type=button>Clear</button><span id=count class=count></span></div>';
 }
 
 /** panel(title, tag, body) */
@@ -216,14 +224,39 @@ return '<section class=shell>' + hero() + '<div class=board><section class=bmain
 '<aside class=side>' + modelPanel() + termsPanel() + ledgerPanel() + '</aside></div></section>';
 }
 
+/** liveHtml(): every token-bearing protocol with a cap, set aside from the pre-token ranking. */
+function liveHtml() {
+var n = D.live.length;
+var cap = D.live.reduce(function (a, r) { return a + r.mcap_usd; }, 0);
+var ms = D.live.map(function (r) { return r.multiple; }).sort(function (a, b) { return a - b; });
+var median = ms.length ? ms[Math.floor(ms.length / 2)] : 0;
+var body = D.live.map(function (r) {
+var sub = catName(r.category) + ' · ' + (r.chains.length ? r.chains.slice(0, 2).join(', ') : 'unnamed chain');
+return '<tr><td><div class=pname>' + esc(r.name) + '</div><div class=psub>' + esc(sub) + '</div></td>' +
+'<td class=r>' + usd(r.tvl_usd) + '</td><td class=r>' + usd(r.mcap_usd) + '</td><td class=r>' + mult(r.multiple) + '</td><td class=r>' + pct(r.change_7d) + '</td></tr>';
+}).join('');
+return '<section class=shell><div class=hero><div><p class=kicker>Set aside &middot; token trades</p><h1>Their cap is a fact, not a model</h1><p class=dek>' + n +
+' protocols record a token and a market cap. For these the token already trades, so the cap is observed, not fitted; none of them is ranked as a launch. The board\'s ' + D.board_size +
+' rows are the protocols still to come, priced from TVL, seven-day growth and time without a token. <a href="#/">Back to the pre-token board</a>.</p></div><div class=kpis>' +
+kpi('Priced protocols', String(n), 'token and cap on record') +
+kpi('Market cap on record', usd(cap), 'sum of the ' + n) +
+kpi('Median cap / TVL', mult(median), 'observed, not fitted') +
+kpi('Pre-token ranked', String(D.board_size), 'the board') +
+kpi('Watchlist ranked', D.checks.watchlist_covered + ' / ' + D.checks.watchlist_total, 'all on the board') +
+kpi('Also set aside', String(D.ledger.cex + D.ledger.versioned), D.ledger.cex + ' exchanges, ' + D.ledger.versioned + ' versioned pools') +
+'</div></div><div class=filters><b>' + n + ' priced protocols</b><span class=count>all ' + n + ' rows are in the table: scroll inside it · ordered by market cap</span></div>' +
+'<div class=tablebox><table><thead><tr><th>Protocol</th><th class=r>TVL</th><th class=r>Market cap</th><th class=r>Cap / TVL</th><th class=r>TVL 7d</th></tr></thead><tbody>' + body + '</tbody></table></div>' +
+'<p class=caption>Market cap and TVL are DefiLlama\'s record on ' + D.as_of + '. A cap / TVL multiple here is an observation, not a fitted value: the value leg is fitted only on tokens that carry a listing date, and no live row enters a pre-token implied value.</p></section>';
+}
+
 /** refreshBoard() */
 function refreshBoard() {
 var list = visibleRows();
 byId('count').textContent = list.length + ' of ' + D.board_size + ' rows';
-byId('cap').textContent = 'Ranked by implied value. Showing ' + list.length + ' of ' + D.board_size + ' ranked rows' + (state.farms ? ', only those that clear $25/h after fees' : '') +
+byId('cap').textContent = 'Ranked by implied value. Showing ' + list.length + ' of ' + D.board_size + ' ranked rows' + (state.verdict !== 'all' ? ', only the ' + state.verdict + ' verdicts; the rank column still carries the model\'s implied-value order' : '') +
 '. Bars are scaled to implied value; the pale tail under each is the value leg\'s P25-P75 range.';
 var more = byId('more');
-if (more) more.textContent = list.length > 14 ? (list.length === D.board_size ? 'All ' + D.board_size + ' rows are in the table: scroll inside it for the rest, same columns.' : 'Scroll inside the table for the remaining ' + (list.length - 14) + ' rows.') : (list.length === 0 ? '' : list.length + ' rows here; open any one for its eight-step farm plan, the costs behind the net figure and its nearest comps.');
+if (more) more.textContent = list.length > 14 ? (list.length === D.board_size ? 'All ' + D.board_size + ' rows are in the table: scroll inside it for the rest, same columns.' : 'Scroll inside the table for the remaining ' + (list.length - 14) + ' rows.') : (list.length === 0 ? '' : list.length + ' rows here; open any one for its eight-step farm plan, the costs behind the net figure and its nearest priced peers.');
 byId('thead').innerHTML = thead();
 byId('rows').innerHTML = rowsHtml(list);
 }
@@ -250,16 +283,16 @@ tb.style.maxHeight = h > 120 ? Math.ceil(h) + 'px' : '';
 
 /** wireBoard() */
 function wireBoard() {
-var q = byId('q'), sector = byId('sector'), chain = byId('chain'), growth = byId('growth'), farms = byId('farms');
-sector.value = state.sector; chain.value = state.chain; growth.value = state.growth; farms.checked = state.farms;
+var q = byId('q'), sector = byId('sector'), chain = byId('chain'), growth = byId('growth');
+sector.value = state.sector; chain.value = state.chain; growth.value = state.growth;
 q.addEventListener('input', function () { state.q = q.value; refreshBoard(); });
 sector.addEventListener('change', function () { state.sector = sector.value; refreshBoard(); });
 chain.addEventListener('change', function () { state.chain = chain.value; refreshBoard(); });
 growth.addEventListener('change', function () { state.growth = growth.value; refreshBoard(); });
-farms.addEventListener('change', function () { state.farms = farms.checked; refreshBoard(); });
 byId('clear').addEventListener('click', function () {
-state.q = ''; state.sector = 'all'; state.chain = 'all'; state.growth = 'all'; state.farms = false;
-q.value = ''; sector.value = 'all'; chain.value = 'all'; growth.value = 'all'; farms.checked = false; refreshBoard();
+state.q = ''; state.sector = 'all'; state.chain = 'all'; state.growth = 'all'; state.verdict = 'all';
+q.value = ''; sector.value = 'all'; chain.value = 'all'; growth.value = 'all';
+if (window.location.hash.indexOf('#/v/') === 0 || window.location.hash.indexOf('#/farms') === 0) window.location.hash = '#/'; else refreshBoard();
 });
 byId('thead').addEventListener('click', function (e) {
 var b = e.target.closest('button[data-sort]');
@@ -366,25 +399,28 @@ return '<section class="shell detail"><a class=back href="#/">&larr; Back to the
 '<div class=dcol><h2>Farm economics</h2>' + ktiles(row.farm) +
 '<h2 class=gap>Cost</h2>' + costsTable(row.farm) +
 '<h2 class=gap>Verdict rule</h2>' + verdictBox(row) +
-'<h2 class=gap>Nearest comps</h2><p class=caption>The three live protocols closest in TVL. The band is this row\'s P25-P75 implied range; each dot is a comp\'s market cap.</p>' + compStrip(row) + compsTable(row) + '</div></div></section>';
+'<h2 class=gap>Nearest priced peers</h2><p class=caption>Their tokens already trade, so each market cap is a fact, not a model. The three closest in TVL; the band is this row\'s P25-P75 range and each dot is a peer\'s cap.</p>' + compStrip(row) + compsTable(row) + '</div></div></section>';
 }
 
 /** route() */
 function route() {
 var h = window.location.hash || '#/';
 if (h.indexOf('#/p/') === 0) return { view: 'detail', slug: decodeURIComponent(h.slice(4)) };
-if (h.indexOf('#/farms') === 0) return { view: 'farms' };
+if (h.indexOf('#/v/') === 0) { state.verdict = h.slice(4); if (state.verdict === 'FARM') { state.sort = 'perHour'; state.dir = -1; } return { view: 'board' }; }
+if (h.indexOf('#/farms') === 0) { state.verdict = 'FARM'; state.sort = 'perHour'; state.dir = -1; return { view: 'farms' }; }
+if (h.indexOf('#/live') === 0) return { view: 'live' };
+if (h === '#/' || h === '') { state.verdict = 'all'; state.sort = 'implied'; state.dir = -1; }
 return { view: 'board' };
 }
 
 /** render() */
 function render() {
 var r = route();
-state.farms = r.view === 'farms';
-app.innerHTML = topbar(r.view) + (r.view === 'detail' ? detailHtml(r.slug) : boardHtml());
-if (r.view !== 'detail') { wireBoard(); fitBoard(); }
-app.setAttribute('aria-busy', 'false');
+app.innerHTML = topbar(r.view) + (r.view === 'detail' ? detailHtml(r.slug) : r.view === 'live' ? liveHtml() : boardHtml());
 if (r.view === 'detail') window.scrollTo(0, 0);
+else if (r.view === 'live') fitBoard();
+else { wireBoard(); fitBoard(); }
+app.setAttribute('aria-busy', 'false');
 }
 
 window.addEventListener('resize', function () { if (route().view !== 'detail') fitBoard(); });
