@@ -123,9 +123,9 @@ function rowHtml(r) {
 var g = r.change_7d;
 function at(v) { return Math.min(100, Math.sqrt(Math.max(0, v) / IMP_MAX) * 100); }
 var lo = at(r.implied_low), hi = at(r.implied_high), pt = at(r.implied_value_usd);
-var sub = [catName(r.category)].concat(r.chains.slice(0, 2)).join(' · ') + ' · ' + pct(g);
+var sub = state.farms ? esc(r.farm.play) + ' · cost ' + usd2(r.farm.cost) + ' · ' + hoursText(r.farm.timeMin) : [catName(r.category)].concat(r.chains.slice(0, 2)).join(' · ') + ' · ' + pct(g);
 return '<tr data-slug="' + esc(r.slug) + '"><td class=rank>' + r.rank + '</td>' +
-'<td><div class=pname>' + esc(r.name) + '</div><div class=psub>' + esc(sub) + '</div></td>' +
+'<td><div class=pname>' + esc(r.name) + '</div><div class=psub>' + esc(sub) + '</div>' + '</td>' +
 '<td class=r>' + usd(r.tvl_usd) + '</td><td class=r>' + age(r.age_days) + '</td>' +
 '<td class="r oddc"><span class=odd>' + Math.round(r.odds * 100) + '%</span><span class=obar aria-hidden=true><i style="width:' + Math.round(r.odds * 100) + '%"></i></span></td>' +
 '<td class=r>' + usd(r.if_launched_usd) + '</td>' +
