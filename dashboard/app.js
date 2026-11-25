@@ -1,361 +1,361 @@
-// Token Radar's plain dashboard. It reads window.RADAR (written beside dashboard/ by main.ts) and
-// renders the ranked board, a filterable table, a per-protocol detail drawer with the model's own
-// inputs and the protocol's farm plan. No network: every byte it shows is in data.js.
+// Launch Ledger's page: reads window.RADAR and window.RadarModel; renders the board, detail, planner
+// and set-aside from the hash. No network, no clock; every figure is a value from data.js.
 (function () {
-  'use strict';
+'use strict';
+var D = window.RADAR, M = window.RadarModel;
+if (!D || !M) return;
+var app = document.getElementById('app');
+var state = { q: '', sector: 'all', chain: 'all', growth: 'all', farms: false, sort: 'implied', dir: -1 };
 
-  var DATA = window.RADAR;
-  if (!DATA) return;
-  var app = document.getElementById('board');
-  var state = { q: '', category: 'all', tab: 'pre-token', sort: 'implied', dir: -1, selected: null };
+/** esc(s) */
+function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+/** trim(n) */
+function trim(n) { var r = Math.round(n * 100) / 100; return r % 1 === 0 ? String(r) : r.toFixed(2).replace(/0+$/, '').replace(/\.$/, ''); }
+/** usd(n) */
+function usd(n) {
+if (n === null || n === undefined || !isFinite(n)) return 'n/a';
+var a = Math.abs(n);
+return a >= 1e9 ? '$' + trim(n / 1e9) + 'B' : a >= 1e6 ? '$' + (a >= 1e8 ? Math.round(n / 1e6) : trim(n / 1e6)) + 'M' : a >= 1e3 ? '$' + Math.round(n / 1e3) + 'K' : '$' + Math.round(n);
+}
+/** usd2(n) */
+function usd2(n) { return '$' + (Math.round(n * 100) / 100).toFixed(2); }
+/** pct(n) */
+function pct(n) { return n === null || n === undefined || !isFinite(n) ? 'no 7d' : (n > 0 ? '+' : '') + n.toFixed(1) + '%'; }
+/** age(days) */
+function age(days) { return days === null || days === undefined ? 'unknown' : days >= 365 ? (days / 365).toFixed(1) + ' y' : Math.round(days) + ' d'; }
+/** ageWords(days) */
+function ageWords(days) { return days === null || days === undefined ? 'an unknown number of days' : days.toLocaleString('en-US') + ' days'; }
+/** mult(n) */
+function mult(n) { return n === null || n === undefined || !isFinite(n) ? 'n/a' : trim(n) + 'x'; }
+/** dex(n) */
+function dex(n) { return n === null || n === undefined ? '0.00 dex' : (n >= 0 ? '+' : '') + n.toFixed(2) + ' dex'; }
+/** byId(id) */
+function byId(id) { return document.getElementById(id); }
 
-  var usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
-  function fmtUsd(n) {
-    if (n === null || n === undefined || !isFinite(n)) return 'n/a';
-    if (Math.abs(n) >= 1e9) return '$' + (n / 1e9).toFixed(2) + 'B';
-    if (Math.abs(n) >= 1e6) return '$' + (n / 1e6).toFixed(1) + 'M';
-    if (Math.abs(n) >= 1e3) return '$' + Math.round(n / 1e3) + 'K';
-    return usd.format(n);
-  }
-  function fmtPct(n) {
-    if (n === null || n === undefined || !isFinite(n)) return 'n/a';
-    return (n > 0 ? '+' : '') + n.toFixed(2) + '%';
-  }
-  function fmtAge(days) {
-    if (days === null || days === undefined) return 'unknown';
-    if (days >= 365) return (days / 365).toFixed(1) + 'y';
-    return Math.max(0, Math.round(days)) + 'd';
-  }
-  // The model in one function: the page recomputes a row from the snapshot figures and checks the
-  // number board.json carries, so the page's code and the board's data are visibly the same arithmetic.
-  function impliedOf(row, model) {
-    var growth = Math.min(model.growth_cap, Math.max(model.growth_floor, row.change_7d === null || row.change_7d === undefined ? 0 : row.change_7d));
-    var growthMult = 1 + (growth / 100) * model.growth_weight;
-    var age = row.age_days === null || row.age_days === undefined ? model.unknown_age_days : row.age_days;
-    var maturity = model.maturity_floor + (Math.min(Math.max(age, 0), model.maturity_days) / model.maturity_days) * model.maturity_range;
-    return Math.max(1, Math.round(row.tvl_usd * model.base_multiple * growthMult * maturity));
-  }
+/** topbar(active) */
+function topbar(active) {
+var nav = [['#/', 'Board', 'board'], ['#/p/' + D.rows[0].slug, 'Detail', 'detail'], ['#/planner', 'Planner', 'planner'], ['#/aside', 'Set aside', 'aside']];
+return '<header class=topbar><div class=topbar-in><a class=wordmark href="#/"><i></i>LAUNCH LEDGER</a><nav class=topnav>' +
+nav.map(function (n) { return '<a href="' + n[0] + '"' + (active === n[2] ? ' class=on' : '') + '>' + n[1] + '</a>'; }).join('') +
+'</nav><div class=topright><span class=stamp>DefiLlama ' + D.as_of + '</span><span class=pill>watchlist ' + D.checks.watchlist_covered + '/' + D.checks.watchlist_total + '</span><span class=pill>checkBoard ' + D.checks.rows_recomputed + '/' + D.checks.rows + '</span></div></div></header>';
+}
 
-  function el(tag, attrs) {
-    var node = document.createElement(tag);
-    if (attrs) {
-      Object.keys(attrs).forEach(function (k) {
-        if (k === 'class') node.className = attrs[k];
-        else if (k === 'text') node.textContent = attrs[k];
-        else if (k === 'html') node.innerHTML = attrs[k];
-        else if (k.slice(0, 2) === 'on') node.addEventListener(k.slice(2), attrs[k]);
-        else if (attrs[k] !== null && attrs[k] !== undefined) node.setAttribute(k, attrs[k]);
-      });
-    }
-    for (var i = 2; i < arguments.length; i++) {
-      var child = arguments[i];
-      if (child === null || child === undefined) continue;
-      if (Array.isArray(child)) child.forEach(function (c) { if (c) node.appendChild(c); });
-      else if (typeof child === 'string') node.appendChild(document.createTextNode(child));
-      else node.appendChild(child);
-    }
-    return node;
-  }
+/** kpi(label, value, note) */
+function kpi(label, value, note) { return '<div class=kpi><span>' + label + '</span><b>' + value + '</b><em>' + note + '</em></div>'; }
 
-  // The farm plan is the same derivation main.ts writes to board.json: category, chains, TVL and age
-  // decide the action, the capital, the hold and every cost and time. No name is special-cased.
-  function chainOf(p) { return p.chains && p.chains.length > 0 ? p.chains[0] : 'its main chain'; }
-  function capitalFor(p) {
-    if (p.tvl_usd >= 5e9) return 250;
-    if (p.tvl_usd >= 1e9) return 150;
-    if (p.tvl_usd >= 1e8) return 100;
-    return 50;
-  }
-  function holdDaysFor(age) {
-    if (age === null || age === undefined) return 30;
-    if (age < 180) return 60;
-    if (age < 365) return 45;
-    return 30;
-  }
-  function actionFor(p, capital, chain) {
-    var c = (p.category || '').toLowerCase();
-    var name = p.name;
-    if (c.indexOf('lend') >= 0 || c.indexOf('cdp') >= 0 || c.indexOf('collateral') >= 0) return 'Supply $' + capital + ' of USDC to ' + name + ' on ' + chain + ' and keep the position open.';
-    if (c.indexOf('dex') >= 0 || c.indexOf('yield') >= 0 || c.indexOf('leveraged farm') >= 0) return 'Provide $' + capital + ' of liquidity to ' + name + "'s main pool on " + chain + ' and keep the position open.';
-    if (c.indexOf('bridge') >= 0) return 'Bridge $' + capital + ' of USDC to ' + chain + ' through ' + name + ' and use the bridged funds in its app.';
-    if (c.indexOf('staking') >= 0 || c.indexOf('restak') >= 0) return "Stake $" + capital + " of the chain's staking asset through " + name + ' and keep the receipt.';
-    if (c.indexOf('perpetual') >= 0 || c.indexOf('derivative') >= 0) return 'Deposit $' + capital + ' of USDC as margin on ' + name + ' and open one small hedge.';
-    if (c.indexOf('prediction') >= 0) return 'Fund $' + capital + ' and place one market position on ' + name + '.';
-    if (c.indexOf('curator') >= 0 || c.indexOf('allocator') >= 0) return 'Deposit $' + capital + ' into a ' + name + ' vault on ' + chain + ' and keep the shares.';
-    if (c.indexOf('stable') >= 0) return 'Mint or deposit $' + capital + ' of the stable asset through ' + name + ' on ' + chain + '.';
-    if (c.indexOf('rwa') >= 0) return "Mint $" + capital + " of the protocol's yield asset on " + chain + ' and hold it.';
-    if (c.indexOf('insurance') >= 0) return 'Buy $' + capital + ' of cover from ' + name + ' on ' + chain + ' and keep the policy.';
-    return 'Deposit $' + capital + ' of USDC into ' + name + ' on ' + chain + ' and keep the position open.';
-  }
-  function stepText(step) {
-    var s = step.text + ' Cost: ' + step.cost + '. Time: ' + step.time + '.';
-    if (s.length > 600) s = s.slice(0, 596) + '...';
-    if (s.length < 20) s = s + " Hold the position and check the protocol's own page.";
-    return s;
-  }
-  function farmSteps(p) {
-    var chain = chainOf(p);
-    var capital = capitalFor(p);
-    var hold = holdDaysFor(p.age_days);
-    return [
-      { text: 'Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline.', cost: 'under $3 of gas for the first transaction', time: '5 minutes' },
-      { text: actionFor(p, capital, chain), cost: '$' + capital + ' of capital and about $' + (capital >= 150 ? 8 : 4) + ' of gas', time: '15 minutes to set up' },
-      { text: 'Make one qualifying action each week, such as a deposit, a borrow, a swap or a vote.', cost: 'about $2 of gas a week', time: '10 minutes a week' },
-      { text: 'Hold the position for at least ' + hold + ' days so the activity is counted in more than one snapshot.', cost: 'the $' + capital + ' stays in the position', time: hold + ' days' },
-      { text: "Before you withdraw, open the protocol's own points or rewards page and claim only from the link it publishes.", cost: 'no fee to check, and never pay to claim', time: '10 minutes' },
-      { text: 'Write the wallet, the dates and every transaction in a farm log so you can repeat the position or unwind it.', cost: 'nothing but the log', time: '5 minutes' }
-    ].map(stepText);
-  }
+/** hero() */
+function hero() {
+var m = D.model;
+return '<section class=hero><div><p class=kicker>Pre-token intelligence · ' + D.as_of + '</p><h1>What a token would be worth</h1><p class=dek>' +
+D.scanned + ' protocols scanned, ' + D.pre_token + ' pre-token, ' + D.watchlist_size + ' on the watchlist, ' + D.live_size + ' live tokens set aside.</p></div><div class=kpis>' +
+kpi('Watchlist covered', D.checks.watchlist_covered + '/' + D.checks.watchlist_total, 'every slug on the list') +
+kpi('Pre-token ranked', D.board_size, D.early_size + ' early rows, ' + D.watchlist_size + ' watchlist') +
+kpi('Median live multiple', mult(m.median_live_multiple), D.live_size + ' live tokens, market cap / TVL') +
+kpi('Blind test in range', Math.round(D.backtest.loo.share * 100) + '% / ' + Math.round(D.backtest.newer.share * 100) + '%', 'leave-one-out / newer, ' + D.backtest.loo.inside + '/' + D.backtest.loo.n + ' and ' + D.backtest.newer.inside + '/' + D.backtest.newer.n) +
+'</div></section>';
+}
 
-  function readHash() {
-    var hash = window.location.hash.replace(/^#/, '');
-    if (!hash) return;
-    var params = new URLSearchParams(hash);
-    if (params.get('q')) state.q = params.get('q');
-    if (params.get('p')) state.selected = params.get('p');
-    if (params.get('category')) state.category = params.get('category');
-  }
-  function writeHash() {
-    var params = new URLSearchParams();
-    if (state.q) params.set('q', state.q);
-    if (state.category !== 'all') params.set('category', state.category);
-    if (state.selected) params.set('p', state.selected);
-    var next = params.toString();
-    if (next) window.history.replaceState(null, '', '#' + next);
-    else window.history.replaceState(null, '', window.location.pathname + window.location.search);
-  }
+/** growthPass(v) */
+function growthPass(v) {
+if (state.growth === 'all') return true;
+if (state.growth === 'unknown') return v === null || v === undefined;
+if (v === null || v === undefined) return false;
+if (state.growth === 'up20') return v >= 20;
+if (state.growth === 'up') return v > 0;
+if (state.growth === 'down') return v < 0;
+return v <= -20;
+}
 
-  function rows() {
-    var q = state.q.trim().toLowerCase();
-    return DATA.rows.filter(function (r) {
-      if (state.category !== 'all' && r.category !== state.category) return false;
-      if (!q) return true;
-      var hay = [r.name, r.slug, r.category, (r.chains || []).join(' ')].join(' ').toLowerCase();
-      return hay.indexOf(q) >= 0;
-    });
-  }
-  function sortedRows(list) {
-    var key = state.sort;
-    return list.slice().sort(function (a, b) {
-      var av, bv;
-      if (key === 'name') { av = a.name.toLowerCase(); bv = b.name.toLowerCase(); }
-      else if (key === 'tvl') { av = a.tvl_usd; bv = b.tvl_usd; }
-      else if (key === 'growth') { av = a.change_7d === null ? -Infinity : a.change_7d; bv = b.change_7d === null ? -Infinity : b.change_7d; }
-      else if (key === 'age') { av = a.age_days === null ? Infinity : a.age_days; bv = b.age_days === null ? Infinity : b.age_days; }
-      else { av = a.implied_value_usd; bv = b.implied_value_usd; }
-      if (av < bv) return -state.dir;
-      if (av > bv) return state.dir;
-      return a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0;
-    });
-  }
+/** sortVal(row, key) */
+function sortVal(r, key) {
+if (key === 'tvl') return r.tvl_usd;
+if (key === 'growth') return r.change_7d === null || r.change_7d === undefined ? -1e9 : r.change_7d;
+if (key === 'age') return r.age_days === null || r.age_days === undefined ? 1e9 : r.age_days;
+if (key === 'size') return r.size_mult;
+if (key === 'perHour') return r.farm.perHour;
+return r.implied_value_usd;
+}
 
-  function header() {
-    return el('header', { class: 'top' },
-      el('div', { class: 'brand' }, el('span', { class: 'mark' }), el('span', { class: 'brand-name', text: 'Token Radar' })),
-      el('div', { class: 'top-meta' },
-        el('span', { text: 'Snapshot ' + DATA.as_of }),
-        el('span', { text: 'DefiLlama protocol index' }),
-        el('span', { text: DATA.model_version + ' model' })
-      )
-    );
-  }
+/** visibleRows() */
+function visibleRows() {
+var q = state.q.trim().toLowerCase();
+var list = D.rows.filter(function (r) {
+if (state.farms && r.farm.verdict !== 'FARM') return false;
+if (state.sector !== 'all' && r.category !== state.sector) return false;
+if (state.chain !== 'all' && r.chains.indexOf(state.chain) < 0) return false;
+if (!growthPass(r.change_7d)) return false;
+return !q || (r.name + ' ' + r.slug + ' ' + r.category + ' ' + r.chains.join(' ')).toLowerCase().indexOf(q) >= 0;
+});
+return list.sort(function (a, b) {
+var av = sortVal(a, state.sort), bv = sortVal(b, state.sort);
+return av !== bv ? (av < bv ? -state.dir : state.dir) : a.rank - b.rank;
+});
+}
 
-  function lede() {
-    return el('section', { class: 'lede' },
-      el('div', null,
-        el('h1', { text: DATA.watchlist_size + ' watchlist protocols, ranked by implied value' }),
-        el('p', { text: 'The watchlist is the floor: every protocol with at least $' + Math.round(DATA.floor_usd / 1e6) + 'M of TVL and no token on record. The early radar adds ' + DATA.early_size + ' pre-token protocols below that floor. Implied value is a model, not a promise.' })
-      ),
-      el('div', { class: 'facts' },
-        el('div', { class: 'fact' }, el('span', { text: 'Watchlist covered' }), el('b', { text: DATA.watchlist_size + ' / ' + DATA.watchlist_size })),
-        el('div', { class: 'fact' }, el('span', { text: 'Pre-token rows scored' }), el('b', { text: String(DATA.board_size) })),
-        el('div', { class: 'fact' }, el('span', { text: 'Early rows below the floor' }), el('b', { text: String(DATA.early_size) })),
-        el('div', { class: 'fact' }, el('span', { text: 'Live-token protocols set aside' }), el('b', { text: String(DATA.live_size) }))
-      )
-    );
-  }
+/** th(label, key) */
+function th(label, key, cls) {
+var on = state.sort === key;
+return '<th' + (cls ? ' class=' + cls : '') + '><button type=button data-sort=' + key + '>' + label + (on ? (state.dir < 0 ? ' &darr;' : ' &uarr;') : '') + '</button></th>';
+}
 
-  function controls() {
-    var categories = Array.from(new Set(DATA.rows.map(function (r) { return r.category || 'Other'; }))).sort();
-    var search = el('input', { type: 'search', id: 'q', placeholder: 'Search name, category or chain', value: state.q, 'aria-label': 'Search the board' });
-    search.addEventListener('input', function () { state.q = search.value; writeHash(); render(); });
-    var select = el('select', { id: 'category', 'aria-label': 'Filter by category' },
-      el('option', { value: 'all', text: 'All categories' }),
-      categories.map(function (c) { return el('option', { value: c, text: c, selected: c === state.category ? 'selected' : null }); })
-    );
-    select.addEventListener('change', function () { state.category = select.value; writeHash(); render(); });
-    var pre = el('button', { type: 'button', 'aria-pressed': state.tab === 'pre-token' ? 'true' : 'false', text: 'Pre-token', onclick: function () { state.tab = 'pre-token'; render(); } });
-    var live = el('button', { type: 'button', 'aria-pressed': state.tab === 'live' ? 'true' : 'false', text: 'Live token', onclick: function () { state.tab = 'live'; render(); } });
-    return el('div', { class: 'controls' },
-      el('div', { class: 'field' }, el('label', { for: 'q', text: 'Search' }), search),
-      el('div', { class: 'field' }, el('label', { for: 'category', text: 'Category' }), select),
-      el('div', { class: 'field' }, el('span', { class: 'sub', text: 'Token status' }), el('div', { class: 'tabs' }, pre, live)),
-      el('span', { class: 'count', text: state.tab === 'pre-token' ? rows().length + ' rows shown' : DATA.live.length + ' live-token protocols' })
-    );
-  }
+/** thead() */
+function thead() { return '<tr><th><button type=button data-sort=implied>#</button></th><th>Protocol</th>' + th('TVL', 'tvl', 'r') + th('7d', 'growth', 'r') + th('No token', 'age', 'r') + th('Size curve', 'size') + th('Implied value', 'implied') + th('Farm', 'perHour', 'r') + '</tr>'; }
 
-  function sortHeader(key, label) {
-    return el('th', { scope: 'col' },
-      el('button', { type: 'button', onclick: function () { if (state.sort === key) state.dir = -state.dir; else { state.sort = key; state.dir = -1; } render(); } },
-        label,
-        state.sort === key ? el('span', { 'aria-hidden': 'true', text: state.dir < 0 ? ' v' : ' ^' }) : null
-      )
-    );
-  }
+/** rowHtml(r) */
+function rowHtml(r) {
+var g = r.change_7d, w = Math.max(3, Math.round(Math.sqrt(r.implied_value_usd / (D.rows[0].implied_value_usd || 1)) * 100));
+var sub = r.category + (r.chains.length ? ' · ' + r.chains.slice(0, 2).join(', ') : '');
+return '<tr data-slug="' + esc(r.slug) + '"><td class=rank>' + r.rank + '</td>' +
+'<td><div class=pname>' + esc(r.name) + '</div><div class=psub>' + esc(sub) + '</div></td>' +
+'<td class=r>' + usd(r.tvl_usd) + '</td><td class="r ' + (g === null || g === undefined ? '' : g >= 0 ? 'pos' : 'neg') + '">' + pct(g) + '</td>' +
+'<td class=r>' + age(r.age_days) + '</td><td><span class=size>' + mult(r.size_mult) + '</span></td>' +
+'<td class=imp><div class=impv>' + usd(r.implied_value_usd) + '</div><div class=impr>' + usd(r.implied_low) + ' to ' + usd(r.implied_high) + '</div><div class=impbar aria-hidden=true><i style="width:' + w + '%"></i></div></td>' +
+'<td class=farmcell><span class="chip ' + r.farm.verdict + '">' + r.farm.verdict + '</span><span class=rate>' + usd(r.farm.perHour) + '/h</span></td></tr>';
+}
 
-  function boardTable() {
-    var list = sortedRows(rows());
-    if (list.length === 0) {
-      return el('div', { class: 'panel' }, el('div', { class: 'empty' },
-        el('h2', { text: 'No protocol matches that filter' }),
-        el('p', { text: 'Clear the search or pick another category to see the board again.' }),
-        el('button', { class: 'button primary', type: 'button', text: 'Clear filters', onclick: function () { state.q = ''; state.category = 'all'; writeHash(); render(); } })
-      ));
-    }
-    var max = list[0].implied_value_usd || 1;
-    var tbody = el('tbody');
-    list.forEach(function (r) {
-      var growth = r.change_7d === null ? 'n/a' : fmtPct(r.change_7d);
-      var growthClass = r.change_7d === null ? '' : r.change_7d >= 0 ? 'pos' : 'neg';
-      var tr = el('tr', {
-        'data-selected': state.selected === r.slug ? 'true' : 'false',
-        tabindex: '0',
-        onclick: function () { openDetail(r.slug); },
-        onkeydown: function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(r.slug); } }
-      },
-        el('td', { class: 'num', text: String(r.rank) }),
-        el('td', null, el('div', { class: 'name' },
-          el('b', { text: r.name }),
-          el('span', { class: 'sub', text: (r.category || 'Other') + ' on ' + (r.chains && r.chains.length ? r.chains.slice(0, 2).join(', ') : 'an unnamed chain') })
-        )),
-        el('td', { class: 'num', text: fmtUsd(r.tvl_usd) }),
-        el('td', { class: 'num ' + growthClass, text: growth }),
-        el('td', { class: 'num', text: fmtAge(r.age_days) }),
-        el('td', null, el('div', { class: 'implied' },
-          el('div', { class: 'bar', 'aria-hidden': 'true' }, el('i', { style: 'width:' + Math.max(3, Math.round((r.implied_value_usd / max) * 100)) + '%' })),
-          el('span', { class: 'num', text: fmtUsd(r.implied_value_usd) })
-        )),
-        el('td', null, el('span', { class: 'status', text: 'no token' }))
-      );
-      tbody.appendChild(tr);
-    });
-    return el('div', { class: 'panel' },
-      el('div', { class: 'table-wrap' },
-        el('table', null,
-          el('caption', { class: 'sub', text: 'Pre-token protocols, strongest implied value first. Select a row for its model and farm plan.' }),
-          el('thead', null, el('tr', null,
-            sortHeader('implied', 'Rank'),
-            sortHeader('name', 'Protocol'),
-            sortHeader('tvl', 'TVL'),
-            sortHeader('growth', '7d'),
-            sortHeader('age', 'Age'),
-            sortHeader('implied', 'Implied value'),
-            el('th', { scope: 'col', text: 'Token' })
-          )),
-          tbody
-        )
-      )
-    );
-  }
+/** rowsHtml(list) */
+function rowsHtml(list) {
+return list.length === 0 ? '<tr><td colspan=8 class=caption>No row matches these filters. Clear one to widen the ledger.</td></tr>' : list.map(rowHtml).join('');
+}
 
-  function liveTable() {
-    var tbody = el('tbody');
-    DATA.live.forEach(function (r) {
-      tbody.appendChild(el('tr', null,
-        el('td', { class: 'num', text: 'live' }),
-        el('td', null, el('div', { class: 'name' }, el('b', { text: r.name }), el('span', { class: 'sub', text: (r.category || 'Other') + ' on ' + (r.chains && r.chains.length ? r.chains.slice(0, 2).join(', ') : 'an unnamed chain') }))),
-        el('td', { class: 'num', text: fmtUsd(r.tvl_usd) }),
-        el('td', { class: 'num ' + (r.change_7d !== null && r.change_7d >= 0 ? 'pos' : 'neg'), text: fmtPct(r.change_7d) }),
-        el('td', { class: 'num', text: fmtUsd(r.mcap_usd) }),
-        el('td', null, el('span', { class: 'status', text: 'already trades' }))
-      ));
-    });
-    return el('div', { class: 'panel' },
-      el('div', { class: 'table-wrap' },
-        el('table', null,
-          el('caption', { class: 'sub', text: 'Token live: these protocols already trade, so their market cap is a fact, not a model. They are set aside from the pre-token ranking.' }),
-          el('thead', null, el('tr', null, el('th', { scope: 'col', text: 'Status' }), el('th', { scope: 'col', text: 'Protocol' }), el('th', { scope: 'col', text: 'TVL' }), el('th', { scope: 'col', text: '7d' }), el('th', { scope: 'col', text: 'Market cap' }), el('th', { scope: 'col', text: 'Token' }))),
-          tbody
-        )
-      )
-    );
-  }
+/** filterBar() */
+function filterBar() {
+function options(values, all) { return '<option value=all>' + all + '</option>' + values.map(function (v) { return '<option>' + esc(v) + '</option>'; }).join(''); }
+return '<div class=filters><div class=field><label for=q>Search</label><input id=q type=search value="' + esc(state.q) + '" placeholder="Name, slug, sector or chain"></div>' +
+'<div class=field><label for=sector>Sector</label><select id=sector>' + options(D.sectors, 'All sectors') + '</select></div>' +
+'<div class=field><label for=chain>Chain</label><select id=chain>' + options(D.chains, 'All chains') + '</select></div>' +
+'<div class=field><label for=growth>Growth</label><select id=growth><option value=all>Any growth</option><option value=up20>Up 20% or more</option><option value=up>Up</option><option value=down>Down</option><option value=down20>Down 20% or more</option><option value=unknown>No 7d print</option></select></div>' +
+'<label class=check for=farms><input id=farms type=checkbox> Farms only</label><button id=clear class=btn type=button>Clear</button><span id=count class=count></span></div>';
+}
 
-  function modelPanel() {
-    var m = DATA.model;
-    return el('section', { class: 'panel model' },
-      el('h2', { text: 'How implied value is computed' }),
-      el('p', { class: 'sub', text: 'Every row is scored by one function of the snapshot figures. No protocol name is special-cased, and no row is hand-picked.' }),
-      el('div', { class: 'formula' },
-        'implied = round( tvl_usd x ' + m.base_multiple + ' x (1 + clamp(change_7d, ' + m.growth_floor + ', ' + m.growth_cap + ') / 100 x ' + m.growth_weight + ') x (' + m.maturity_floor + ' + min(age_days, ' + m.maturity_days + ') / ' + m.maturity_days + ' x ' + m.maturity_range + ') )'
-      ),
-      el('p', { class: 'sub', text: 'TVL and seven-day growth come from the snapshot. Age is the time since the protocol was first listed, the best record of how long it has run with no token; an unlisted age uses ' + m.unknown_age_days + ' days. The early radar is every pre-token protocol below the watchlist floor, by TVL, and the live-token protocols are set aside with their market caps shown.' })
-    );
-  }
+/** ladder() */
+function ladder() {
+var top = D.rows.slice(0, 10), logs = top.map(function (r) { return Math.log10(r.implied_value_usd); });
+var lo = Math.min.apply(null, logs), hi = Math.max.apply(null, logs);
+return '<section class=panel><div class=ph><h2>Value ladder</h2><span>ALL 200 ROWS, TOP 10</span></div><div class=ladder>' +
+top.map(function (r, i) {
+var w = hi > lo ? 18 + 82 * ((logs[i] - lo) / (hi - lo)) : 100;
+return '<div class=lrow><span class="muted num">' + r.rank + '</span><div><div class=lname>' + esc(r.name) + '</div><div class=lbar><i style="width:' + w.toFixed(1) + '%"></i></div></div><span class=lval>' + usd(r.implied_value_usd) + '</span></div>';
+}).join('') + '</div></section>';
+}
 
-  var dialog = el('dialog', { class: 'detail', id: 'detail', 'aria-labelledby': 'detail-title' });
-  dialog.addEventListener('close', function () { state.selected = null; writeHash(); });
+/** formulaPanel() */
+function formulaPanel() {
+var m = D.model;
+function chip(name, range) { return '<span class=fchip><b>' + name + ' </b>' + range + '</span>'; }
+return '<section class=panel><div class=ph><h2>How implied value is built</h2><span>ONE FORMULA, 200 ROWS</span></div><div class=formula>implied = TVL x sizeCurve(TVL) x sector x growth x age x chains</div><div class=fchips>' +
+chip('size', mult(m.size_min) + '–' + mult(m.size_max)) + chip('sector', '0.55x–1.8x') + chip('growth', mult(m.growth_min) + '–' + mult(m.growth_max)) +
+chip('age', mult(m.age_min) + '–' + mult(m.age_max)) + chip('chains', '1x–' + mult(1 + m.chain_max)) + chip('band', '±' + m.band.toFixed(2) + ' dex') +
+'</div><p class=tnote>Theil-Sen on ' + m.comps + ' live comps: slope ' + m.slope.toFixed(2) + ', intercept ' + m.intercept.toFixed(2) + '. The range is the residual interquartile range, ' + m.band.toFixed(2) + ' dex either side.</p></section>';
+}
 
-  function openDetail(slug) {
-    var row = DATA.rows.filter(function (r) { return r.slug === slug; })[0];
-    if (!row) return;
-    state.selected = slug;
-    writeHash();
-    dialog.textContent = '';
-    var steps = farmSteps(row);
-    dialog.appendChild(el('div', { class: 'detail-head' },
-      el('div', null,
-        el('span', { class: 'brand-name', text: 'Rank ' + row.rank + ' of ' + DATA.board_size }),
-        el('h2', { id: 'detail-title', text: row.name }),
-        el('p', { class: 'sub', text: (row.category || 'Other') + ' on ' + (row.chains && row.chains.length ? row.chains.join(', ') : 'an unnamed chain') })
-      ),
-      el('button', { class: 'close', type: 'button', 'aria-label': 'Close details', text: 'Close', onclick: function () { dialog.close(); } })
-    ));
-    dialog.appendChild(el('section', { class: 'detail-section' },
-      el('h3', { text: 'Implied value' }),
-      el('div', { class: 'equation' },
-        el('div', null, el('span', { text: 'TVL' }), el('b', { class: 'num', text: fmtUsd(row.tvl_usd) })),
-        el('div', null, el('span', { text: 'Seven-day growth' }), el('b', { class: 'num', text: fmtPct(row.change_7d) })),
-        el('div', null, el('span', { text: 'Age with no token' }), el('b', { class: 'num', text: fmtAge(row.age_days) })),
-        el('div', null, el('span', { text: 'Growth multiplier' }), el('b', { class: 'num', text: String(row.growth_multiplier) })),
-        el('div', null, el('span', { text: 'Maturity multiplier' }), el('b', { class: 'num', text: String(row.maturity_multiplier) })),
-        el('div', null, el('span', { text: 'Implied value' }), el('b', { class: 'num', text: fmtUsd(row.implied_value_usd) }))
-      ),
-      el('p', { class: 'sub', text: 'Model ' + DATA.model_version + ': the same function scores every protocol. The page recomputes this row as ' + fmtUsd(impliedOf(row, DATA.model)) + (impliedOf(row, DATA.model) === row.implied_value_usd ? ', the same number board.json carries.' : ', which differs from the board: the data would be stale.') + ' This is an estimate, not a price.' })
-    ));
-    dialog.appendChild(el('section', { class: 'detail-section' },
-      el('h3', { text: 'Farm plan' }),
-      el('ol', { class: 'steps' }, steps.map(function (s) {
-        var at = s.indexOf(' Cost: ');
-        var action = at >= 0 ? s.slice(0, at) : s;
-        var tail = at >= 0 ? s.slice(at + 1) : '';
-        return el('li', null, el('b', { text: action }), el('span', { class: 'cost', text: tail }));
-      }))
-    ));
-    if (typeof dialog.showModal === 'function') {
-      if (!dialog.open) dialog.showModal();
-    } else {
-      dialog.setAttribute('open', '');
-    }
-  }
+/** testPanel() */
+function testPanel() {
+var b = D.backtest;
+function bar(label, t) { return '<div><div class=tl><span>' + label + '</span><b>' + t.inside + '/' + t.n + ' · ' + Math.round(t.share * 100) + '%</b></div><div class=tbar><i style="width:' + (t.share * 100).toFixed(1) + '%"></i></div></div>'; }
+return '<section class=panel><div class=ph><h2>Blind tests</h2><span>SAME MODEL, HELD OUT</span></div><div class=tests>' + bar('Leave-one-out', b.loo) + bar('Newest 40%', b.newer) +
+'<p class=tnote>Median miss ' + Math.pow(10, b.loo.medianError).toFixed(1) + 'x on leave-one-out, ' + Math.pow(10, b.newer.medianError).toFixed(1) + 'x on the newest 40%. Range band ' + b.band.toFixed(2) + ' dex.</p></div><div class=tnote>checkBoard(): ' + D.checks.rows_recomputed + '/' + D.checks.rows + ' rows recomputed = board.json</div></section>';
+}
 
-  function render() {
-    app.textContent = '';
-    var shell = el('div', { class: 'shell' });
-    shell.appendChild(header());
-    shell.appendChild(lede());
-    shell.appendChild(controls());
-    shell.appendChild(state.tab === 'pre-token' ? boardTable() : liveTable());
-    if (state.tab === 'pre-token') shell.appendChild(modelPanel());
-    app.appendChild(shell);
-    app.setAttribute('aria-busy', 'false');
-    if (!dialog.isConnected) app.appendChild(dialog);
-    if (state.selected) openDetail(state.selected);
-  }
+/** boardHtml() */
+function boardHtml() {
+return '<section class=shell>' + hero() + '<div class=board><section class=bmain>' + filterBar() + '<p class=caption>Ranked by implied value. Select a row for the factor waterfall and its farm plan.</p>' +
+'<div class=tablebox><table><thead id=thead>' + thead() + '</thead><tbody id=rows></tbody></table></div></section>' +
+'<aside class=side>' + ladder() + formulaPanel() + testPanel() + '</aside></div></section>';
+}
 
-  readHash();
-  render();
-  window.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && dialog.open) dialog.close();
-  });
+/** refreshBoard() */
+function refreshBoard() {
+var list = visibleRows();
+byId('count').textContent = list.length + ' of ' + D.board_size + ' rows';
+byId('thead').innerHTML = thead();
+byId('rows').innerHTML = rowsHtml(list);
+}
+
+/** wireBoard() */
+function wireBoard() {
+var q = byId('q'), sector = byId('sector'), chain = byId('chain'), growth = byId('growth'), farms = byId('farms');
+sector.value = state.sector; chain.value = state.chain; growth.value = state.growth; farms.checked = state.farms;
+q.addEventListener('input', function () { state.q = q.value; refreshBoard(); });
+sector.addEventListener('change', function () { state.sector = sector.value; refreshBoard(); });
+chain.addEventListener('change', function () { state.chain = chain.value; refreshBoard(); });
+growth.addEventListener('change', function () { state.growth = growth.value; refreshBoard(); });
+farms.addEventListener('change', function () { state.farms = farms.checked; refreshBoard(); });
+byId('clear').addEventListener('click', function () {
+state.q = ''; state.sector = 'all'; state.chain = 'all'; state.growth = 'all'; state.farms = false;
+q.value = ''; sector.value = 'all'; chain.value = 'all'; growth.value = 'all'; farms.checked = false; refreshBoard();
+});
+byId('thead').addEventListener('click', function (e) {
+var b = e.target.closest('button[data-sort]');
+if (!b) return;
+var key = b.getAttribute('data-sort');
+if (state.sort === key) state.dir = -state.dir; else { state.sort = key; state.dir = -1; }
+refreshBoard();
+});
+function open(e) { var tr = e.target.closest('tr[data-slug]'); if (tr) window.location.hash = '#/p/' + tr.getAttribute('data-slug'); }
+byId('rows').addEventListener('click', open);
+byId('rows').addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(e); } });
+refreshBoard();
+}
+
+/** factorWidth(f): bar width in percent; 1x is half the track, 1.51x is three quarters. */
+function factorWidth(f) { return Math.max(2, Math.min(100, 50 * f)); }
+
+/** waterfall(row): factor bars scaled from 1x, TVL and implied value full width. */
+function waterfall(row) {
+var rows = [
+['TVL', usd(row.tvl_usd), 'reported on ' + D.as_of, 100],
+['Size curve', mult(row.size_mult), 'Theil-Sen fit, ' + D.model.comps + ' comps, slope ' + D.model.slope.toFixed(2), factorWidth(row.size_mult)],
+['Sector', mult(row.sector_mult), row.category + ', ' + dex(row.sector_effect) + ' residual', factorWidth(row.sector_mult)],
+['7d growth', mult(row.growth_mult), pct(row.change_7d) + ' vs ' + pct(row.sector_median) + ' sector median', factorWidth(row.growth_mult)],
+['Time with no token', mult(row.age_mult), row.age_days === null ? 'no listing date' : row.age_days + ' days on record', factorWidth(row.age_mult)],
+['Chains', mult(row.chain_mult), row.chains.length + ' chain' + (row.chains.length === 1 ? '' : 's') + ': ' + row.chains.join(', '), factorWidth(row.chain_mult)]
+];
+return '<div class=wf>' + rows.map(function (r) {
+return '<div class=wrow><div class=wlab><b>' + r[0] + '</b><span>' + esc(r[2]) + '</span></div><div class=wbar><i style="width:' + r[3] + '%"></i><span class=tick></span></div><div class=wval>' + r[1] + '</div></div>';
+}).join('') + '<div class="wrow last"><div class=wlab><b>Implied value</b><span>range ' + usd(row.implied_low) + ' to ' + usd(row.implied_high) + '</span></div><div class=wbar><i style="width:100%"></i></div><div class=wval>' + usd(row.implied_value_usd) + '</div></div></div>' +
+'<p class=caption>Bar scale: 1x is half the track, 0.2x is a fifth of the 1x bar, 1.51x is three quarters. TVL and implied value are full width.</p>';
+}
+
+/** compStrip(row) */
+function compStrip(row) {
+var values = [row.implied_low, row.implied_high, row.implied_value_usd].concat(row.comps.map(function (c) { return c.mcap_usd; })).filter(function (v) { return v > 0; });
+var lo = Math.min.apply(null, values), hi = Math.max.apply(null, values), a = Math.log10(lo), b = Math.log10(hi);
+function pos(v) { return b <= a ? 50 : Math.max(1, Math.min(99, ((Math.log10(Math.max(v, lo)) - a) / (b - a)) * 100)); }
+var left = pos(row.implied_low), width = Math.max(1, pos(row.implied_high) - left);
+return '<div class=strip><div class=band style="left:' + left + '%;width:' + width + '%"></div>' +
+row.comps.map(function (c) { return '<div class=dot style="left:' + pos(c.mcap_usd) + '%"></div>'; }).join('') +
+'<div class=mark style="left:' + pos(row.implied_value_usd) + '%"></div></div>' +
+'<div class=axis><span>' + usd(lo) + '</span><span>market cap, log scale</span><span>' + usd(hi) + '</span></div>';
+}
+
+/** compsTable(row) */
+function compsTable(row) {
+return '<table class="dtable"><thead><tr><th>Comp</th><th>Sector</th><th class=r>TVL</th><th class=r>Cap</th><th class=r>Multiple</th></tr></thead><tbody>' +
+row.comps.map(function (c) { return '<tr><td>' + esc(c.name) + '</td><td class=muted>' + esc(c.category) + '</td><td class=r>' + usd(c.tvl_usd) + '</td><td class=r>' + usd(c.mcap_usd) + '</td><td class=r>' + mult(c.multiple) + '</td></tr>'; }).join('') +
+'</tbody></table>';
+}
+
+var STEP_NAMES = ['Verify', 'Bridge and fund', 'Enter', 'Qualify', 'Upkeep', 'Stop rule', 'Exit', 'Claim'];
+var STEP_DAYS = [0, 0, 1, 7, 14, 30, 80, 90];
+
+/** timeline(farm) */
+function timeline(farm) {
+return '<ol class=timeline>' + farm.steps.map(function (s, i) {
+var m = / Cost: \$([0-9.]+)\. Time: (\d+) min\.$/.exec(s);
+var body = s.replace(/ Cost: \$[0-9.]+\. Time: \d+ min\.$/, '');
+return '<li><span class=day>Day ' + STEP_DAYS[i] + '</span><b>' + STEP_NAMES[i] + '</b><span class=ct>$' + (m ? m[1] : '0') + ' · ' + (m ? m[2] : '0') + ' min</span><p>' + esc(body) + '</p></li>';
+}).join('') + '</ol>';
+}
+
+/** costsTable(farm) */
+function costsTable(farm) {
+var slip = farm.ticket * 0.003, bridge = farm.cost - slip;
+return '<table class=costs><tbody><tr><td>Bridge and gas</td><td>' + usd2(bridge) + '</td></tr><tr><td>Slippage on ' + usd(farm.ticket) + ' ticket</td><td>' + usd2(slip) + '</td></tr><tr class=total><td>Total cost</td><td>' + usd2(farm.cost) + '</td></tr></tbody></table>';
+}
+
+/** ktiles(farm) */
+function ktiles(farm) {
+function tile(label, value) { return '<div class=ktile><span>' + label + '</span><b>' + value + '</b></div>'; }
+return '<div class=ktiles>' + tile('Expected at launch', usd(farm.expected)) + tile('Cost', usd2(farm.cost)) + tile('Net', usd(farm.net)) + tile('Net per hour', usd(farm.perHour) + '/h') + '</div>';
+}
+
+/** hoursText(min): 132 minutes reads as 2 h 12 min. */
+function hoursText(min) { var h = Math.floor(min / 60), m = min % 60; return h + ' h' + (m ? ' ' + m + ' min' : ''); }
+
+/** detailHtml(slug) */
+function detailHtml(slug) {
+var row = D.rows.filter(function (r) { return r.slug === slug; })[0];
+if (!row) return '<section class="shell detail"><a class=back href="#/">&#8592; Back to the board</a><p class=caption>No row has that slug. It may be outside the 200 ranked rows.</p></section>';
+var chains = row.chains.length ? row.chains.join(', ') : 'an unnamed chain';
+return '<section class="shell detail"><a class=back href="#/">&#8592; Back to the board</a><div class=dhead><div><p class=kicker>Protocol dossier</p><h1>' + esc(row.name) + '</h1><p class=dmeta>Rank ' + row.rank + ' of ' + D.board_size + ', ' + esc(row.category) + ', ' + esc(chains) + ', TVL ' + usd(row.tvl_usd) + ', no token on record for ' + ageWords(row.age_days) + '.</p><p class=dmeta>Farm plan: ' + usd(row.farm.ticket) + ' ticket, total cost ' + usd2(row.farm.cost) + ', total time ' + hoursText(row.farm.timeMin) + '.</p></div>' +
+'<div class=dval><span class=lab>Implied value</span><span class=big>' + usd(row.implied_value_usd) + '</span><span class=rng>' + usd(row.implied_low) + ' to ' + usd(row.implied_high) + '</span></div></div>' +
+'<div class=dgrid><div class=dcol><h2>Factor waterfall</h2><p class=caption>Each factor multiplies the one above; the last bar is the rounded implied value.</p>' + waterfall(row) +
+'<h2 style="margin-top:28px">Nearest comps</h2><p class=caption>The three live protocols closest in TVL. The shaded band is the implied range; the rule is this row.</p>' + compStrip(row) + compsTable(row) +
+'<h2 style="margin-top:28px">Farm economics</h2>' + ktiles(row.farm) + '</div>' +
+'<div class=dcol><h2>Farm plan</h2><p class=caption>' + esc(row.farm.play) + ' · ' + row.farm.windowDays + ' days · ' + usd(row.farm.ticket) + ' ticket · ' + row.farm.hours + ' hours</p>' + timeline(row.farm) +
+'<h2 style="margin-top:20px">Cost</h2>' + costsTable(row.farm) +
+'<p class=risk>A launch is not promised. The expected value is 1.5% of the ticket at the implied price, and that allocation would be shared across every farmer. The stop rule exits if TVL falls 20% or seven-day growth drops below -30%. Window: ' + row.farm.windowDays + ' days.</p></div></div></section>';
+}
+
+/** campaign(capital, weeklyHours) */
+function campaign(capital, weeklyHours) {
+var timeLeft = weeklyHours * (D.model.window_days / 7), moneyLeft = capital, picked = [];
+var ranked = D.rows.slice().sort(function (a, b) { return b.farm.perHour !== a.farm.perHour ? b.farm.perHour - a.farm.perHour : a.rank - b.rank; });
+ranked.some(function (r) {
+if (picked.length >= 10 || r.farm.hours > timeLeft) return true;
+if (r.farm.ticket > moneyLeft) return false;
+picked.push(r); moneyLeft -= r.farm.ticket; timeLeft -= r.farm.hours;
+return picked.length >= 10;
+});
+return picked;
+}
+
+/** plannerBody(capital, weeklyHours) */
+function plannerBody(capital, weeklyHours) {
+var picked = campaign(capital, weeklyHours);
+var s = picked.reduce(function (a, r) { a.ticket += r.farm.ticket; a.cost += r.farm.cost; a.expected += r.farm.expected; a.net += r.farm.net; a.hours += r.farm.hours; return a; }, { ticket: 0, cost: 0, expected: 0, net: 0, hours: 0 });
+var per = s.hours > 0 ? s.net / s.hours : 0;
+var tiles = '<div class=sum><div><span>Capital deployed</span><b>' + usd(s.ticket) + '</b></div><div><span>Cost</span><b>' + usd(s.cost) + '</b></div><div><span>Expected</span><b>' + usd(s.expected) + '</b></div><div><span>Net</span><b>' + usd(s.net) + '</b></div><div><span>Net per hour</span><b>' + usd(per) + '/h</b></div></div>';
+if (picked.length === 0) return tiles + '<p class=caption>No farm fits that capital and time. Raise either budget.</p>';
+var rows = picked.map(function (r) {
+return '<tr><td class=num>' + r.rank + '</td><td><b>' + esc(r.name) + '</b><div class=psub>' + esc(r.category) + '</div></td><td>' + esc(r.farm.play) + '</td><td class=r>' + usd(r.farm.ticket) + '</td><td class=r>' + usd(r.farm.cost) + '</td><td class=r>' + r.farm.hours + ' h</td><td class=r>' + usd(r.farm.expected) + '</td><td class=r>' + usd(r.farm.net) + '</td><td class=r>' + usd(r.farm.perHour) + '/h</td></tr>';
+}).join('');
+return tiles + '<table class=ptable><thead><tr><th>#</th><th>Protocol</th><th>Play</th><th class=r>Ticket</th><th class=r>Cost</th><th class=r>Hours</th><th class=r>Expected</th><th class=r>Net</th><th class=r>Per hour</th></tr></thead><tbody>' + rows +
+'<tr class=total><td colspan=3><b>Total</b> <span class=muted>' + picked.length + ' positions</span></td><td class=r>' + usd(s.ticket) + '</td><td class=r>' + usd(s.cost) + '</td><td class=r>' + s.hours.toFixed(1) + ' h</td><td class=r>' + usd(s.expected) + '</td><td class=r>' + usd(s.net) + '</td><td class=r>' + usd(per) + '/h</td></tr></tbody></table>';
+}
+
+/** plannerHtml() */
+function plannerHtml() {
+return '<section class="shell page"><div class=phead><div><p class=kicker>Planner · ' + D.model.window_days + '-day window</p><h1>Campaign planner</h1><p class=dek>Spend the capital and the time you actually have, best net per hour first. Each position takes a ticket of ' + usd(D.model.tickets[0]) + ' to ' + usd(D.model.tickets[D.model.tickets.length - 1]) + ', never more than 1% of its TVL, and ' + D.model.hours + ' hours.</p></div>' +
+'<p class=caption>The board\u2019s top farm pays ' + usd(D.rows[0].farm.perHour) + '/h in the model. The planner caps the campaign at ten positions.</p></div>' +
+'<div class=pcontrols><div><label for=cap>Capital</label><input id=cap type=range min=5000 max=50000 step=2500 value=50000><b id=capval class=val></b></div>' +
+'<div><label for=hrs>Your time</label><input id=hrs type=range min=1 max=10 step=1 value=6><b id=hrsval class=val></b></div></div><div id=plan></div>' +
+'<p class=plnote>Time available is the weekly hours times ' + (D.model.window_days / 7).toFixed(1) + ' weeks. The planner buys the highest net-per-hour rows while both budgets last; a row that cannot pay its ticket is skipped, and the ten-position cap keeps the work finite.</p></section>';
+}
+
+/** wirePlanner() */
+function wirePlanner() {
+var cap = byId('cap'), hrs = byId('hrs');
+function draw() {
+var capital = Number(cap.value), weekly = Number(hrs.value);
+byId('capval').textContent = usd(capital);
+byId('hrsval').textContent = weekly + ' h / week';
+byId('plan').innerHTML = plannerBody(capital, weekly);
+}
+cap.addEventListener('input', draw);
+hrs.addEventListener('input', draw);
+draw();
+}
+
+/** asideHtml() */
+function asideHtml() {
+var rows = D.live.map(function (r) {
+return '<tr><td><b>' + esc(r.name) + '</b><div class=psub>' + esc(r.chains.length ? r.chains.slice(0, 2).join(', ') : 'an unnamed chain') + '</div></td><td class=r>' + usd(r.tvl_usd) + '</td><td class=r>' + usd(r.mcap_usd) + '</td><td class=r>' + mult(r.multiple) + '</td><td>' + esc(r.category) + '</td></tr>';
+}).join('');
+return '<section class="shell page"><div class=phead><div><p class=kicker>Set aside · ' + D.live_size + ' live tokens</p><h1>Already trading</h1></div><p class=dek>These protocols have a token and a market cap, so their number is a fact, not a model. They are the comps the size curve learns from and are kept out of the 200-row ranking.</p></div>' +
+'<table class=ptable style="margin-top:18px"><thead><tr><th>Protocol</th><th class=r>TVL</th><th class=r>Market cap</th><th class=r>Multiple</th><th>Sector</th></tr></thead><tbody>' + rows + '</tbody></table></section>';
+}
+
+/** route() */
+function route() {
+var h = window.location.hash || '#/';
+if (h.indexOf('#/p/') === 0) return { view: 'detail', slug: decodeURIComponent(h.slice(4)) };
+if (h.indexOf('#/planner') === 0) return { view: 'planner' };
+if (h.indexOf('#/aside') === 0) return { view: 'aside' };
+return { view: 'board' };
+}
+
+/** render() */
+function render() {
+var r = route();
+app.innerHTML = topbar(r.view) + (r.view === 'detail' ? detailHtml(r.slug) : r.view === 'planner' ? plannerHtml() : r.view === 'aside' ? asideHtml() : boardHtml());
+if (r.view === 'board') wireBoard();
+else if (r.view === 'planner') wirePlanner();
+app.setAttribute('aria-busy', 'false');
+if (r.view !== 'board') window.scrollTo(0, 0);
+}
+
+window.addEventListener('hashchange', render);
+render();
 })();
