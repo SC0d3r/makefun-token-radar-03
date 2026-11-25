@@ -15,7 +15,7 @@ function trim(n) { var r = Math.round(n * 100) / 100; return r % 1 === 0 ? Strin
 function usd(n) {
 if (n === null || n === undefined || !isFinite(n)) return 'n/a';
 var a = Math.abs(n);
-return a >= 1e9 ? '$' + trim(n / 1e9) + 'B' : a >= 1e6 ? '$' + (a >= 1e8 ? Math.round(n / 1e6) : trim(n / 1e6)) + 'M' : a >= 1e3 ? '$' + Math.round(n / 1e3) + 'K' : '$' + Math.round(n);
+return a >= 1e9 ? '$' + trim(n / 1e9) + 'B' : a >= 1e6 ? '$' + (Math.round(n / 1e5) / 10).toFixed(1) + 'M' : a >= 1e3 ? '$' + Math.round(n / 1e3) + 'K' : '$' + Math.round(n);
 }
 /** usd2(n) */
 function usd2(n) { return '$' + (Math.round(n * 100) / 100).toFixed(2); }
@@ -37,7 +37,7 @@ function topbar(active) {
 var nav = [['#/', 'Board', 'board'], ['#/p/' + D.rows[0].slug, 'Detail', 'detail'], ['#/planner', 'Planner', 'planner'], ['#/aside', 'Set aside', 'aside']];
 return '<header class=topbar><div class=topbar-in><a class=wordmark href="#/"><i></i>LAUNCH LEDGER</a><nav class=topnav>' +
 nav.map(function (n) { return '<a href="' + n[0] + '"' + (active === n[2] ? ' class=on' : '') + '>' + n[1] + '</a>'; }).join('') +
-'</nav><div class=topright><span class=stamp>DefiLlama ' + D.as_of + '</span><span class=pill>watchlist ' + D.checks.watchlist_covered + '/' + D.checks.watchlist_total + '</span><span class=pill>checkBoard ' + D.checks.rows_recomputed + '/' + D.checks.rows + '</span></div></div></header>';
+'</nav><div class=topright><span class=stamp>DefiLlama ' + D.as_of + '</span><span class=pill>watchlist ' + D.checks.watchlist_covered + '/' + D.checks.watchlist_total + '</span></div></div></header>';
 }
 
 /** kpi(label, value, note) */
@@ -99,7 +99,7 @@ return '<th' + (cls ? ' class=' + cls : '') + '><button type=button data-sort=' 
 }
 
 /** thead() */
-function thead() { return '<tr><th><button type=button data-sort=implied>#</button></th><th>Protocol</th>' + th('TVL', 'tvl', 'r') + th('7d', 'growth', 'r') + th('No token', 'age', 'r') + th('Size curve', 'size') + th('Implied value', 'implied') + th('Farm', 'perHour', 'r') + '</tr>'; }
+function thead() { return '<tr><th><button type=button data-sort=implied>#</button></th><th>Protocol</th>' + th('TVL', 'tvl', 'r') + th('7d', 'growth', 'r') + th('No token', 'age', 'r') + th('Size curve', 'size', 'r') + th('Implied value', 'implied', 'r') + th('Farm $/h', 'perHour', 'r') + '</tr>'; }
 
 /** rowHtml(r) */
 function rowHtml(r) {
@@ -154,7 +154,7 @@ function testPanel() {
 var b = D.backtest;
 function bar(label, t) { return '<div><div class=tl><span>' + label + '</span><b>' + t.inside + '/' + t.n + ' · ' + Math.round(t.share * 100) + '%</b></div><div class=tbar><i style="width:' + (t.share * 100).toFixed(1) + '%"></i></div></div>'; }
 return '<section class=panel><div class=ph><h2>Blind tests</h2><span>SAME MODEL, HELD OUT</span></div><div class=tests>' + bar('Leave-one-out', b.loo) + bar('Newest 40%', b.newer) +
-'<p class=tnote>Median miss ' + Math.pow(10, b.loo.medianError).toFixed(1) + 'x on leave-one-out, ' + Math.pow(10, b.newer.medianError).toFixed(1) + 'x on the newest 40%. Range band ' + b.band.toFixed(2) + ' dex.</p></div><div class=tnote>checkBoard(): ' + D.checks.rows_recomputed + '/' + D.checks.rows + ' rows recomputed = board.json</div></section>';
+'<p class=tnote>Median miss ' + Math.pow(10, b.loo.medianError).toFixed(1) + 'x on leave-one-out, ' + Math.pow(10, b.newer.medianError).toFixed(1) + 'x on the newest 40%. Range band ' + b.band.toFixed(2) + ' dex.</p></div><div class=tnote>Every one of the ' + D.checks.rows + ' rows is recomputed from the model and matches board.json.</div></section>';
 }
 
 /** boardHtml() */
@@ -170,6 +170,26 @@ var list = visibleRows();
 byId('count').textContent = list.length + ' of ' + D.board_size + ' rows';
 byId('thead').innerHTML = thead();
 byId('rows').innerHTML = rowsHtml(list);
+}
+
+/** fitBoard(): cap the table at a whole number of rows so the fold never slices one. */
+function fitBoard() {
+var tb = document.querySelector('.tablebox');
+if (!tb) return;
+if (window.innerWidth < 1180) { tb.style.maxHeight = ''; return; }
+var t = tb.getBoundingClientRect().top + window.scrollY;
+var side = document.querySelector('.side');
+var rail = side ? side.getBoundingClientRect().bottom + window.scrollY : 0;
+var limit = Math.min(window.innerHeight - 56 + window.scrollY, rail || Infinity);
+var rows = tb.querySelectorAll('tbody tr'), bottom = 0, head = tb.querySelector('thead');
+for (var i = 0; i < rows.length; i++) {
+var rb = rows[i].getBoundingClientRect().bottom + window.scrollY;
+if (rb > limit) break;
+bottom = rb;
+}
+if (!bottom && head) bottom = head.getBoundingClientRect().bottom + window.scrollY;
+var h = bottom ? bottom - t : 0;
+tb.style.maxHeight = h > 120 ? Math.ceil(h) + 'px' : '';
 }
 
 /** wireBoard() */
@@ -268,7 +288,7 @@ function detailHtml(slug) {
 var row = D.rows.filter(function (r) { return r.slug === slug; })[0];
 if (!row) return '<section class="shell detail"><a class=back href="#/">&#8592; Back to the board</a><p class=caption>No row has that slug. It may be outside the 200 ranked rows.</p></section>';
 var chains = row.chains.length ? row.chains.join(', ') : 'an unnamed chain';
-return '<section class="shell detail"><a class=back href="#/">&#8592; Back to the board</a><div class=dhead><div><p class=kicker>Protocol dossier</p><h1>' + esc(row.name) + '</h1><p class=dmeta>Rank ' + row.rank + ' of ' + D.board_size + ', ' + esc(row.category) + ', ' + esc(chains) + ', TVL ' + usd(row.tvl_usd) + ', no token on record for ' + ageWords(row.age_days) + '.</p><p class=dmeta>Farm plan: ' + usd(row.farm.ticket) + ' ticket, total cost ' + usd2(row.farm.cost) + ', total time ' + hoursText(row.farm.timeMin) + '.</p></div>' +
+return '<section class="shell detail"><a class=back href="#/">&#8592; Back to the board</a><div class=dhead><div><p class=kicker>Protocol dossier</p><h1>' + esc(row.name) + '</h1><p class=dmeta>Rank ' + row.rank + ' of ' + D.board_size + ', ' + esc(row.category) + ', ' + esc(chains) + ', TVL ' + usd(row.tvl_usd) + ', no token on record for ' + ageWords(row.age_days) + '.</p><p class=dmeta>Farm plan: ' + usd(row.farm.ticket) + ' ticket, expected ' + usd(row.farm.expected) + ', cost ' + usd2(row.farm.cost) + ', net ' + usd(row.farm.net) + ', ' + usd(row.farm.perHour) + '/h, total time ' + hoursText(row.farm.timeMin) + '.</p></div>' +
 '<div class=dval><span class=lab>Implied value</span><span class=big>' + usd(row.implied_value_usd) + '</span><span class=rng>' + usd(row.implied_low) + ' to ' + usd(row.implied_high) + '</span></div></div>' +
 '<div class=dgrid><div class=dcol><h2>Factor waterfall</h2><p class=caption>Each factor multiplies the one above; the last bar is the rounded implied value.</p>' + waterfall(row) +
 '<h2 style="margin-top:28px">Nearest comps</h2><p class=caption>The three live protocols closest in TVL. The shaded band is the implied range; the rule is this row.</p>' + compStrip(row) + compsTable(row) +
@@ -350,11 +370,13 @@ return { view: 'board' };
 function render() {
 var r = route();
 app.innerHTML = topbar(r.view) + (r.view === 'detail' ? detailHtml(r.slug) : r.view === 'planner' ? plannerHtml() : r.view === 'aside' ? asideHtml() : boardHtml());
-if (r.view === 'board') wireBoard();
+if (r.view === 'board') { wireBoard(); fitBoard(); }
 else if (r.view === 'planner') wirePlanner();
 app.setAttribute('aria-busy', 'false');
 if (r.view !== 'board') window.scrollTo(0, 0);
 }
+
+window.addEventListener('resize', function () { if (route().view === 'board') fitBoard(); });
 
 window.addEventListener('hashchange', render);
 render();

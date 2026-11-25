@@ -64,12 +64,13 @@ td.rank{width:30px;font-family:var(--mono);font-size:10px;color:var(--muted)}
 .pname{font-size:13px;font-weight:650;line-height:1.15;white-space:nowrap}
 .psub{font-size:9.5px;line-height:1.25;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px}
 td.r{text-align:right;font-family:var(--mono);white-space:nowrap}
+.dtable th.r{text-align:right}
 .size{font-family:var(--mono);font-size:10.5px;color:var(--muted);white-space:nowrap}
 .impv{font-family:var(--mono);font-size:12px;font-weight:650;white-space:nowrap}
 .imp{text-align:right}
 .impr{font-family:var(--mono);font-size:9px;color:var(--muted);white-space:nowrap;text-align:right}
-.impbar{height:2px;background:var(--rule);margin-top:3px}
-.impbar i{display:block;height:100%;background:var(--ink)}
+.impbar{height:3px;background:var(--rule);margin-top:4px}
+.impbar i{display:block;height:100%;background:var(--muted)}
 .farmcell{text-align:right;white-space:nowrap}
 .chip{display:inline-block;padding:2px 5px;font-family:var(--mono);font-size:8.5px;border:1px solid transparent}
 .chip.FARM{background:var(--forest);color:var(--bone)}
